@@ -3,10 +3,14 @@ import type { Data } from "./git";
 
 type Metric = "commits" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
+type View = Partial<{
+  metric: string; bucket: string; cumulative: boolean; layout: string;
+  zoom: [number, number] | null; hidden: string[]; excludedExts: string[];
+}>;
 
 const [data, saved] = (await Promise.all(
-  ["/api/data", "/api/merges"].map((u) => fetch(u).then((r) => r.json())),
-)) as [Data & { repo: string }, Record<string, string>];
+  ["/api/data", "/api/state"].map((u) => fetch(u).then((r) => r.json())),
+)) as [Data & { repo: string }, { merges: Record<string, string>; view: View }];
 const raw = data.commits.map(([t, a, ...files]) => ({ t: t! * 1000, a: a!, files })).sort((x, y) => x.t - y.t);
 const authors = data.authors;
 
@@ -20,30 +24,56 @@ const rowsEl = $("rows");
 const chartEl = $("chart");
 $("repo").textContent = `${data.repo} · ${raw.length.toLocaleString()} commits`;
 
-// --- state ---
+// --- state, restored from the per-repo file ---
+const view = saved.view;
 const parent = authors.map((_, i) => i); // author index -> merged root
 const byEmail = new Map(authors.map((a, i) => [a.email, i]));
-for (const [alias, root] of Object.entries(saved)) {
+for (const [alias, root] of Object.entries(saved.merges)) {
   const i = byEmail.get(alias), r = byEmail.get(root);
   if (i !== undefined && r !== undefined) parent[i] = r;
 }
-// keeps entries for authors not in this history (e.g. other branches)
-function saveMerges() {
-  for (const [i, p] of parent.entries()) {
-    delete saved[authors[i]!.email];
-    if (p !== i) saved[authors[i]!.email] = authors[p]!.email;
-  }
-  fetch("/api/merges", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(saved) });
-}
-const hidden = new Set<number>(); // roots
+const hidden = new Set<number>( // roots
+  (view.hidden ?? []).flatMap((e) => (byEmail.has(e) ? [parent[byEmail.get(e)!]!] : [])),
+);
 const expanded = new Set<number>(); // roots showing their aliases
-let zoom: [number, number] | null = null; // visible ms range
+let zoom: [number, number] | null = view.zoom ?? null; // visible ms range
+const restore = (el: HTMLSelectElement, v?: string) => {
+  if (v && [...el.options].some((o) => o.value === v)) el.value = v;
+};
+restore(metricEl, view.metric);
+restore(layoutEl, view.layout);
+cumulativeEl.checked = view.cumulative ?? false;
+
+// entries for authors/extensions not in this history (e.g. other branches) are kept, not dropped
+let saveTimer: ReturnType<typeof setTimeout>;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    for (const [i, p] of parent.entries()) {
+      delete saved.merges[authors[i]!.email];
+      if (p !== i) saved.merges[authors[i]!.email] = authors[p]!.email;
+    }
+    const known = new Set(authors.map((a) => a.email));
+    const knownExt = new Set(data.exts);
+    saved.view = {
+      metric: metricEl.value, bucket: bucketEl.value, cumulative: cumulativeEl.checked, layout: layoutEl.value, zoom,
+      hidden: [...(view.hidden ?? []).filter((e) => !known.has(e)), ...[...hidden].map((r) => authors[r]!.email)],
+      excludedExts: [
+        ...(view.excludedExts ?? []).filter((x) => !knownExt.has(x)),
+        ...data.exts.filter((_, e) => !allowed.has(e)),
+      ],
+    };
+    fetch("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(saved) });
+  }, 300);
+}
 
 const tMin = raw[0]?.t ?? Date.now();
 const tMax = raw.at(-1)?.t ?? Date.now();
 
 // --- file-type filter: commits reduced to [ms, author, added, deleted] over the selected extensions ---
-const allowed = new Set(data.exts.keys());
+// stored as exclusions so extensions new to the history default to included
+const excluded = new Set(view.excludedExts ?? []);
+const allowed = new Set([...data.exts.keys()].filter((e) => !excluded.has(data.exts[e]!)));
 let commits: (readonly [number, number, number, number])[] = [];
 function applyFilter() {
   const all = allowed.size === data.exts.length;
@@ -59,7 +89,7 @@ function applyFilter() {
   const n = allowed.size;
   extsEl.querySelector("summary")!.textContent =
     n === data.exts.length ? "Files: all" : n === 0 ? "Files: none" :
-    `Files: ${[...allowed].slice(0, 4).map((e) => data.exts[e]).join(" ")}${n > 4 ? ` +${n - 4}` : ""}`;
+    `Files: ${[...data.exts.keys()].filter((e) => allowed.has(e)).slice(0, 4).map((e) => data.exts[e]).join(" ")}${n > 4 ? ` +${n - 4}` : ""}`;
 }
 
 const JS_TS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
@@ -69,7 +99,7 @@ function buildExtFilter() {
   const list = extsEl.querySelector(".list")!;
   const boxes = [...data.exts.keys()].sort((x, y) => churn[y]! - churn[x]!).map((e) => {
     const label = document.createElement("label");
-    const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: true, value: String(e) });
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: allowed.has(e), value: String(e) });
     box.onchange = () => { box.checked ? allowed.add(e) : allowed.delete(e); applyFilter(); render(); };
     const name = Object.assign(document.createElement("span"), { textContent: data.exts[e] });
     const n = Object.assign(document.createElement("span"), { className: "n", textContent: churn[e]!.toLocaleString() });
@@ -90,6 +120,7 @@ function buildExtFilter() {
 }
 const DAY = 864e5;
 bucketEl.value = tMax - tMin < 90 * DAY ? "day" : tMax - tMin < 730 * DAY ? "week" : "month";
+restore(bucketEl, view.bucket);
 
 const value = (c: readonly number[], m: Metric) =>
   m === "commits" ? 1 : m === "added" ? c[2]! : m === "deleted" ? c[3]! : m === "net" ? c[2]! - c[3]! : c[2]! + c[3]!;
@@ -146,6 +177,7 @@ chart.on("datazoom", () => {
   const dz = (chart.getOption() as any).dataZoom[0];
   zoom = [dz.startValue, dz.endValue];
   renderBoard();
+  save();
 });
 new ResizeObserver(() => chart.resize()).observe(chartEl.parentElement!);
 
@@ -296,7 +328,7 @@ function renderBoard() {
         x.className = "x";
         x.textContent = "×";
         x.title = "Unmerge";
-        x.onclick = () => { parent[a] = a; if (aliases(r).length === 0) expanded.delete(r); saveMerges(); render(); };
+        x.onclick = () => { parent[a] = a; if (aliases(r).length === 0) expanded.delete(r); render(); };
         sub.children[1]!.append(x);
       }
       rowsEl.append(sub);
@@ -307,13 +339,13 @@ function renderBoard() {
 function merge(src: number, dst: number) {
   parent.forEach((p, i) => { if (p === src) parent[i] = dst; });
   hidden.delete(src);
-  saveMerges();
   render();
 }
 
 function render() {
   renderChart();
   renderBoard();
+  save();
 }
 
 for (const el of [metricEl, bucketEl, cumulativeEl, layoutEl]) el.onchange = render;

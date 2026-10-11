@@ -25,14 +25,16 @@ try {
   process.exit(1);
 }
 
-// author merges ({aliasEmail: rootEmail}) persist per repo root, outside the repo
+// UI state persists per repo root, outside the repo:
+// { merges: {aliasEmail: rootEmail}, view: {...whatever the page saves} }
 const root = await repoRoot(dir);
 const store = join(
   process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "ggrph",
   `${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 16)}.json`,
 );
-const isMerges = (m: unknown): m is Record<string, string> =>
-  typeof m === "object" && m !== null && !Array.isArray(m) && Object.values(m).every((v) => typeof v === "string");
+const isObj = (o: unknown): o is Record<string, unknown> => typeof o === "object" && o !== null && !Array.isArray(o);
+const isState = (s: unknown): s is { merges: Record<string, string>; view: Record<string, unknown> } =>
+  isObj(s) && isObj(s.merges) && Object.values(s.merges).every((v) => typeof v === "string") && isObj(s.view);
 
 // Bun resolves bundled asset URLs against cwd
 process.chdir(import.meta.dir);
@@ -44,23 +46,24 @@ const server = Bun.serve({
   routes: {
     "/": index,
     "/api/data": () => new Response(payload, { headers: { "content-type": "application/json" } }),
-    "/api/merges": {
+    "/api/state": {
       GET: async () => {
         const f = Bun.file(store);
-        return Response.json((await f.exists()) ? ((await f.json()).merges ?? {}) : {});
+        const saved = (await f.exists()) ? await f.json().catch(() => ({})) : {};
+        return Response.json({ merges: saved.merges ?? {}, view: saved.view ?? {} });
       },
       // JSON content-type forces a CORS preflight, so other sites can't write here
       PUT: async (req) => {
         if (req.headers.get("content-type") !== "application/json") return new Response(null, { status: 415 });
-        const merges = await req.json().catch(() => null);
-        if (!isMerges(merges)) return new Response(null, { status: 400 });
-        await Bun.write(store, JSON.stringify({ repo: root, merges }, null, 2));
-        return Response.json(merges);
+        const state = await req.json().catch(() => null);
+        if (!isState(state)) return new Response(null, { status: 400 });
+        await Bun.write(store, JSON.stringify({ repo: root, merges: state.merges, view: state.view }, null, 2));
+        return new Response(null, { status: 204 });
       },
     },
   },
 });
 
 console.log(`ggrph: ${data.commits.length} commits, ${data.authors.length} authors → ${server.url}`);
-console.log(`ggrph: merges saved in ${store}`);
+console.log(`ggrph: state saved in ${store}`);
 Bun.spawn([process.platform === "darwin" ? "open" : "xdg-open", server.url.href], { stdout: "ignore", stderr: "ignore" });
