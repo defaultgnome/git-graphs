@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ggrph</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e2e1dc;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
+  --accent: #2a78d6; --other: #a3a29c;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8a8984;
+    --accent: #3987e5; --other: #6b6a65;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
+  --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8a8984;
+  --accent: #3987e5; --other: #6b6a65;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--surface-0); color: var(--text-primary);
+  font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+  height: 100vh; display: flex; flex-direction: column;
+}
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface-1);
+}
+h1 { font-size: 16px; margin: 0 8px 0 0; }
+h1 small { color: var(--text-muted); font-weight: 400; }
+label { color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+select { font: inherit; padding: 4px 6px; }
+main { flex: 1; display: grid; grid-template-columns: auto 1fr; min-height: 0; }
+#board { overflow: auto; max-width: 55vw; border-right: 1px solid var(--border); background: var(--surface-1); }
+#chartWrap { overflow: auto; min-width: 0; }
+#chart { width: 100%; height: 100%; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; text-align: right; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary);
+     font-weight: 500; border-bottom: 1px solid var(--border); z-index: 1; }
+th:nth-child(2), td:nth-child(2) { text-align: left; }
+.nm { display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+tbody tr.root { cursor: grab; border-top: 1px solid var(--border); }
+tbody tr.root:hover { background: var(--surface-0); }
+tr.off { opacity: .4; }
+tr.drop { outline: 2px dashed var(--accent); outline-offset: -2px; }
+tr.alias td { color: var(--text-muted); font-size: 12px; padding-top: 0; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.badge { font: inherit; font-size: 11px; margin-left: 6px; padding: 0 6px; border-radius: 8px;
+         border: 1px solid var(--border); background: none; color: var(--text-secondary); cursor: pointer; }
+.x { font: inherit; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; }
+.x:hover { color: var(--text-primary); }
+.add { color: var(--text-secondary); }
+.hint { color: var(--text-muted); font-size: 12px; padding: 8px; }
+@media (max-width: 760px) {
+  body { height: auto; }
+  main { grid-template-columns: 1fr; }
+  #board { max-width: none; max-height: 50vh; border-right: none; border-bottom: 1px solid var(--border); }
+  #chartWrap { height: 70vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>ggrph <small id="repo"></small></h1>
+  <label>Metric
+    <select id="metric">
+      <option value="commits">commits</option>
+      <option value="churn">LOC churn (+ / −)</option>
+      <option value="added">LOC added</option>
+      <option value="deleted">LOC deleted</option>
+      <option value="net">LOC net (+ − −)</option>
+    </select>
+  </label>
+  <label>Bucket
+    <select id="bucket">
+      <option value="day">day</option>
+      <option value="week">week</option>
+      <option value="month">month</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="cumulative"> cumulative</label>
+  <label>Layout
+    <select id="layout">
+      <option value="split">split rows</option>
+      <option value="overlaid">overlaid</option>
+      <option value="stacked">stacked area</option>
+      <option value="total">total</option>
+    </select>
+  </label>
+</header>
+<main>
+  <section id="board">
+    <table>
+      <thead><tr><th>#</th><th>committer</th><th>commits</th><th>+</th><th>−</th><th>first</th><th>last</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="hint">Click a row to hide/show it. Drag a row onto another to merge them. Numbers follow the zoomed range.</p>
+  </section>
+  <section id="chartWrap"><div id="chart"></div></section>
+</main>
+<script type="module" src="./app.ts"></script>
+</body>
+</html>
