@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DEFAULT_EXCLUDES, parseLog } from "./git";
+import { DEFAULT_EXCLUDES, extOf, parseLog } from "./git";
 
 const log = [
   "\x001700000000\tAlice@X.com\tAlice",
@@ -26,10 +26,15 @@ test("parseLog", () => {
     { email: "alice@x.com", name: "Alice" },
     { email: "bob@y.com", name: "Bob" },
   ]);
+  expect(d.exts).toEqual([".ts", ".md"]);
   expect(d.commits).toEqual([
-    [1700000000, 0, 13, 3],
-    [1700000100, 1, 1, 1],
-    [1700000200, 0, 0, 0],
-    [1700000300, 0, 0, 0],
+    [1700000000, 0, 0, 13, 3],
+    [1700000100, 1, 1, 1, 1],
+    [1700000200, 0],
+    [1700000300, 0],
   ]);
+});
+
+test("extOf", () => {
+  expect(["a/b.TSX", "Makefile", "x/.gitignore", "a.min.js"].map(extOf)).toEqual([".tsx", "Makefile", ".gitignore", ".js"]);
 });

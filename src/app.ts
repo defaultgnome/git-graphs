@@ -4,8 +4,10 @@ import type { Data } from "./git";
 type Metric = "commits" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
 
-const data: Data & { repo: string } = await (await fetch("/api/data")).json();
-const commits = data.commits.map(([t, a, add, del]) => [t * 1000, a, add, del] as const).sort((x, y) => x[0] - y[0]);
+const [data, saved] = (await Promise.all(
+  ["/api/data", "/api/merges"].map((u) => fetch(u).then((r) => r.json())),
+)) as [Data & { repo: string }, Record<string, string>];
+const raw = data.commits.map(([t, a, ...files]) => ({ t: t! * 1000, a: a!, files })).sort((x, y) => x.t - y.t);
 const authors = data.authors;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -13,18 +15,79 @@ const metricEl = $<HTMLSelectElement>("metric");
 const bucketEl = $<HTMLSelectElement>("bucket");
 const cumulativeEl = $<HTMLInputElement>("cumulative");
 const layoutEl = $<HTMLSelectElement>("layout");
+const extsEl = $("exts");
 const rowsEl = $("rows");
 const chartEl = $("chart");
-$("repo").textContent = `${data.repo} · ${commits.length.toLocaleString()} commits`;
+$("repo").textContent = `${data.repo} · ${raw.length.toLocaleString()} commits`;
 
-// --- state (in memory only, by design) ---
+// --- state ---
 const parent = authors.map((_, i) => i); // author index -> merged root
+const byEmail = new Map(authors.map((a, i) => [a.email, i]));
+for (const [alias, root] of Object.entries(saved)) {
+  const i = byEmail.get(alias), r = byEmail.get(root);
+  if (i !== undefined && r !== undefined) parent[i] = r;
+}
+// keeps entries for authors not in this history (e.g. other branches)
+function saveMerges() {
+  for (const [i, p] of parent.entries()) {
+    delete saved[authors[i]!.email];
+    if (p !== i) saved[authors[i]!.email] = authors[p]!.email;
+  }
+  fetch("/api/merges", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(saved) });
+}
 const hidden = new Set<number>(); // roots
 const expanded = new Set<number>(); // roots showing their aliases
 let zoom: [number, number] | null = null; // visible ms range
 
-const tMin = commits[0]?.[0] ?? Date.now();
-const tMax = commits.at(-1)?.[0] ?? Date.now();
+const tMin = raw[0]?.t ?? Date.now();
+const tMax = raw.at(-1)?.t ?? Date.now();
+
+// --- file-type filter: commits reduced to [ms, author, added, deleted] over the selected extensions ---
+const allowed = new Set(data.exts.keys());
+let commits: (readonly [number, number, number, number])[] = [];
+function applyFilter() {
+  const all = allowed.size === data.exts.length;
+  commits = raw.flatMap(({ t, a, files }) => {
+    let add = 0, del = 0, hit = false;
+    for (let i = 0; i < files.length; i += 3) {
+      if (!allowed.has(files[i]!)) continue;
+      hit = true; add += files[i + 1]!; del += files[i + 2]!;
+    }
+    // with a filter on, a commit only counts if it touched a selected file type
+    return all || hit ? [[t, a, add, del] as const] : [];
+  });
+  const n = allowed.size;
+  extsEl.querySelector("summary")!.textContent =
+    n === data.exts.length ? "Files: all" : n === 0 ? "Files: none" :
+    `Files: ${[...allowed].slice(0, 4).map((e) => data.exts[e]).join(" ")}${n > 4 ? ` +${n - 4}` : ""}`;
+}
+
+const JS_TS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+function buildExtFilter() {
+  const churn = data.exts.map(() => 0);
+  for (const { files } of raw) for (let i = 0; i < files.length; i += 3) churn[files[i]!] += files[i + 1]! + files[i + 2]!;
+  const list = extsEl.querySelector(".list")!;
+  const boxes = [...data.exts.keys()].sort((x, y) => churn[y]! - churn[x]!).map((e) => {
+    const label = document.createElement("label");
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: true, value: String(e) });
+    box.onchange = () => { box.checked ? allowed.add(e) : allowed.delete(e); applyFilter(); render(); };
+    const name = Object.assign(document.createElement("span"), { textContent: data.exts[e] });
+    const n = Object.assign(document.createElement("span"), { className: "n", textContent: churn[e]!.toLocaleString() });
+    label.append(box, name, n);
+    list.append(label);
+    return box;
+  });
+  const pick = (keep: (ext: string) => boolean) => {
+    allowed.clear();
+    for (const b of boxes) if ((b.checked = keep(data.exts[+b.value]!))) allowed.add(+b.value);
+    applyFilter(); render();
+  };
+  extsEl.querySelector<HTMLButtonElement>(".all")!.onclick = () => pick(() => true);
+  extsEl.querySelector<HTMLButtonElement>(".none")!.onclick = () => pick(() => false);
+  extsEl.querySelector<HTMLButtonElement>(".jsts")!.onclick = () => pick((x) => JS_TS.includes(x));
+  extsEl.querySelector<HTMLButtonElement>(".nojson")!.onclick = () => pick((x) => x !== ".json");
+  document.addEventListener("click", (e) => { if (!extsEl.contains(e.target as Node)) extsEl.removeAttribute("open"); });
+}
 const DAY = 864e5;
 bucketEl.value = tMax - tMin < 90 * DAY ? "day" : tMax - tMin < 730 * DAY ? "week" : "month";
 
@@ -233,7 +296,7 @@ function renderBoard() {
         x.className = "x";
         x.textContent = "×";
         x.title = "Unmerge";
-        x.onclick = () => { parent[a] = a; if (aliases(r).length === 0) expanded.delete(r); render(); };
+        x.onclick = () => { parent[a] = a; if (aliases(r).length === 0) expanded.delete(r); saveMerges(); render(); };
         sub.children[1]!.append(x);
       }
       rowsEl.append(sub);
@@ -244,6 +307,7 @@ function renderBoard() {
 function merge(src: number, dst: number) {
   parent.forEach((p, i) => { if (p === src) parent[i] = dst; });
   hidden.delete(src);
+  saveMerges();
   render();
 }
 
@@ -254,4 +318,6 @@ function render() {
 
 for (const el of [metricEl, bucketEl, cumulativeEl, layoutEl]) el.onchange = render;
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+buildExtFilter();
+applyFilter();
 render();

@@ -4,9 +4,9 @@ export const DEFAULT_EXCLUDES = [
 ];
 
 export type Author = { email: string; name: string };
-// [unix seconds, author index, lines added, lines deleted]
-export type Commit = [number, number, number, number];
-export type Data = { authors: Author[]; commits: Commit[] };
+// [unix seconds, author index, ...(ext index, lines added, lines deleted) per file type touched]
+export type Commit = number[];
+export type Data = { authors: Author[]; exts: string[]; commits: Commit[] };
 
 export const LOG_FORMAT = "%x00%at%x09%aE%x09%aN";
 
@@ -17,11 +17,20 @@ const toGlob = (p: string) => new Bun.Glob(p.startsWith("/") ? p.slice(1) : `**/
 const newPath = (p: string) =>
   p.replace(/\{[^{}]* => ([^{}]*)\}/, "$1").replace(/\/\//g, "/").replace(/^.* => /, "");
 
+// ".ts", ".json"; extensionless files (Makefile, Dockerfile) keep their name
+export function extOf(path: string) {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(dot).toLowerCase() : base;
+}
+
 export function parseLog(text: string, excludes: string[]): Data {
   const globs = excludes.map(toGlob);
   const authors: Author[] = [];
   const byEmail = new Map<string, { i: number; names: Map<string, number> }>();
   const commits: Commit[] = [];
+  const exts: string[] = [];
+  const extIdx = new Map<string, number>();
 
   for (const block of text.split("\0")) {
     if (!block.trim()) continue;
@@ -36,21 +45,26 @@ export function parseLog(text: string, excludes: string[]): Data {
     }
     a.names.set(name!, (a.names.get(name!) ?? 0) + 1);
 
-    let add = 0, del = 0;
+    const perExt = new Map<number, [number, number]>();
     for (const line of lines) {
       const [ad, de, path] = line.split("\t");
       if (!path || ad === "-") continue; // blank line or binary file
       const p = newPath(path);
       if (globs.some((g) => g.match(p))) continue;
-      add += +ad!;
-      del += +de!;
+      const ext = extOf(p);
+      let e = extIdx.get(ext);
+      if (e === undefined) extIdx.set(ext, (e = exts.push(ext) - 1));
+      const sum = perExt.get(e) ?? [0, 0];
+      sum[0] += +ad!;
+      sum[1] += +de!;
+      perExt.set(e, sum);
     }
-    commits.push([+t!, a.i, add, del]);
+    commits.push([+t!, a.i, ...[...perExt].flatMap(([e, [ad, de]]) => [e, ad, de])]);
   }
 
   for (const [, a] of byEmail)
     authors[a.i]!.name = [...a.names].sort((x, y) => y[1] - x[1])[0]![0];
-  return { authors, commits };
+  return { authors, exts, commits };
 }
 
 export async function readRepo(dir: string, excludes: string[]): Promise<Data> {
@@ -63,4 +77,9 @@ export async function readRepo(dir: string, excludes: string[]): Promise<Data> {
   ]);
   if (code !== 0) throw new Error(err.trim() || `git log exited ${code}`);
   return parseLog(out, excludes);
+}
+
+export async function repoRoot(dir: string) {
+  const proc = Bun.spawn(["git", "-C", dir, "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore" });
+  return (await new Response(proc.stdout).text()).trim() || dir;
 }

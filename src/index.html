@@ -45,16 +45,17 @@ h1 { font-size: 16px; margin: 0 8px 0 0; }
 h1 small { color: var(--text-muted); font-weight: 400; }
 label { color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
 select { font: inherit; padding: 4px 6px; }
-main { flex: 1; display: grid; grid-template-columns: auto 1fr; min-height: 0; }
-#board { overflow: auto; max-width: 55vw; border-right: 1px solid var(--border); background: var(--surface-1); }
-#chartWrap { overflow: auto; min-width: 0; }
+main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* native drag handle at the bottom-right corner resizes the chart/board split */
+#chartWrap { flex: none; height: 55vh; min-height: 160px; resize: vertical; overflow: auto; border-bottom: 1px solid var(--border); }
+#board { flex: 1; min-height: 120px; overflow: auto; background: var(--surface-1); }
 #chart { width: 100%; height: 100%; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { padding: 6px 8px; text-align: right; white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary);
      font-weight: 500; border-bottom: 1px solid var(--border); z-index: 1; }
-th:nth-child(2), td:nth-child(2) { text-align: left; }
-.nm { display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+th:nth-child(2), td:nth-child(2) { text-align: left; width: 100%; }
+.nm { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 tbody tr.root { cursor: grab; border-top: 1px solid var(--border); }
 tbody tr.root:hover { background: var(--surface-0); }
 tr.off { opacity: .4; }
@@ -67,11 +68,19 @@ tr.alias td { color: var(--text-muted); font-size: 12px; padding-top: 0; }
 .x:hover { color: var(--text-primary); }
 .add { color: var(--text-secondary); }
 .hint { color: var(--text-muted); font-size: 12px; padding: 8px; }
+details { position: relative; }
+summary { cursor: pointer; color: var(--text-secondary); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; list-style: none; }
+details[open] summary { color: var(--text-primary); }
+details .pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; width: 260px; padding: 8px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px #0003; }
+.pop .btns { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.pop button { font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface-0); color: var(--text-primary); cursor: pointer; }
+.pop .list { max-height: 320px; overflow: auto; }
+.pop .list label { color: var(--text-primary); padding: 2px 0; }
+.pop .n { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 @media (max-width: 760px) {
-  body { height: auto; }
-  main { grid-template-columns: 1fr; }
-  #board { max-width: none; max-height: 50vh; border-right: none; border-bottom: 1px solid var(--border); }
-  #chartWrap { height: 70vh; }
+  th:nth-child(n+6), td:nth-child(n+6) { display: none; }
 }
 </style>
 </head>
@@ -95,6 +104,16 @@ tr.alias td { color: var(--text-muted); font-size: 12px; padding-top: 0; }
     </select>
   </label>
   <label><input type="checkbox" id="cumulative"> cumulative</label>
+  <details id="exts">
+    <summary>Files: all</summary>
+    <div class="pop">
+      <div class="btns">
+        <button class="all">all</button><button class="none">none</button>
+        <button class="jsts">JS/TS only</button><button class="nojson">no .json</button>
+      </div>
+      <div class="list"></div>
+    </div>
+  </details>
   <label>Layout
     <select id="layout">
       <option value="split">split rows</option>
@@ -105,14 +124,14 @@ tr.alias td { color: var(--text-muted); font-size: 12px; padding-top: 0; }
   </label>
 </header>
 <main>
+  <section id="chartWrap"><div id="chart"></div></section>
   <section id="board">
     <table>
       <thead><tr><th>#</th><th>committer</th><th>commits</th><th>+</th><th>−</th><th>first</th><th>last</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <p class="hint">Click a row to hide/show it. Drag a row onto another to merge them. Numbers follow the zoomed range.</p>
+    <p class="hint">Click a row to hide/show it. Drag a row onto another to merge them (saved per repo). Numbers follow the zoomed range and file filter.</p>
   </section>
-  <section id="chartWrap"><div id="chart"></div></section>
 </main>
 <script type="module" src="./app.ts"></script>
 </body>
