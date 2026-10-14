@@ -4,7 +4,7 @@ import type { Data } from "./git";
 type Metric = "commits" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
 type View = Partial<{
-  metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean;
+  metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean; skipFirst: boolean;
   zoom: [number, number] | null; hidden: string[]; excludedExts: string[];
 }>;
 
@@ -23,6 +23,7 @@ const cumulativeEl = $<HTMLInputElement>("cumulative");
 const layoutEl = $<HTMLSelectElement>("layout");
 const modeEl = $<HTMLSelectElement>("mode");
 const trendEl = $<HTMLInputElement>("trend");
+const skipFirstEl = $<HTMLInputElement>("skipFirst");
 const sideEl = $("side");
 const extsEl = $("exts");
 const rowsEl = $("rows");
@@ -50,6 +51,7 @@ restore(layoutEl, view.layout);
 restore(modeEl, view.mode);
 cumulativeEl.checked = view.cumulative ?? false;
 trendEl.checked = view.trend ?? true;
+skipFirstEl.checked = view.skipFirst ?? false;
 
 // entries for authors/extensions not in this history (e.g. other branches) are kept, not dropped
 let saveTimer: ReturnType<typeof setTimeout>;
@@ -64,7 +66,7 @@ function save() {
     const knownExt = new Set(data.exts);
     saved.view = {
       metric: metricEl.value, bucket: bucketEl.value, cumulative: cumulativeEl.checked, layout: layoutEl.value,
-      mode: modeEl.value, trend: trendEl.checked, zoom,
+      mode: modeEl.value, trend: trendEl.checked, skipFirst: skipFirstEl.checked, zoom,
       hidden: [...(view.hidden ?? []).filter((e) => !known.has(e)), ...[...hidden].map((r) => authors[r]!.email)],
       excludedExts: [
         ...(view.excludedExts ?? []).filter((x) => !knownExt.has(x)),
@@ -86,6 +88,7 @@ let commits: (readonly [number, number, number, number, number])[] = [];
 function applyFilter() {
   const all = allowed.size === data.exts.length;
   commits = raw.flatMap(({ t, a, files }, ri) => {
+    if (ri === 0 && skipFirstEl.checked) return []; // raw is oldest-first
     let add = 0, del = 0, hit = false;
     for (let i = 0; i < files.length; i += 3) {
       if (!allowed.has(files[i]!)) continue;
@@ -485,6 +488,7 @@ bindSort(boardEl.tHead!, boardSort, boardKey, renderBoard);
 bindSort(sideTable.tHead!, sideSort, sideKey, renderSide);
 metricEl.onchange = () => { boardSort.k = sideSort.k = ""; boardSort.asc = sideSort.asc = false; render(); };
 for (const el of [bucketEl, cumulativeEl, layoutEl, modeEl, trendEl]) el.onchange = render;
+skipFirstEl.onchange = () => { applyFilter(); render(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 buildExtFilter();
 applyFilter();
