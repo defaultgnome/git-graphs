@@ -244,13 +244,14 @@ function sortRows<T extends Row>(items: T[], s: Sort, k: string, thead: HTMLElem
     th.classList.toggle("on", th.dataset.k === k);
     th.classList.toggle("asc", th.dataset.k === k && s.asc);
   }
-  return items.sort((a, b) => (s.asc ? 1 : -1) * (col(a, k) - col(b, k)));
+  const cmp = (a: T, b: T) => (k === "name" ? authors[a.r!]!.name.localeCompare(authors[b.r!]!.name) : col(a, k) - col(b, k));
+  return items.sort((a, b) => (s.asc ? 1 : -1) * cmp(a, b));
 }
 function bindSort(thead: HTMLElement, s: Sort, current: () => string, rerender: () => void) {
   thead.onclick = (e) => {
     const k = (e.target as HTMLElement).closest("th")?.dataset.k;
     if (!k) return;
-    s.asc = current() === k ? !s.asc : false;
+    s.asc = current() === k ? !s.asc : k === "name"; // names start a→z, numbers start high→low
     s.k = k;
     rerender();
   };
@@ -523,7 +524,7 @@ function renderBoard() {
   const colors = colorOf(rank(m));
   const key = boardKey();
   const order = sortRows([...stats.values()], boardSort, key, boardEl.tHead!);
-  const dated = key === "first" || key === "last";
+  const dated = key === "first" || key === "last" || key === "name"; // no share bar for non-metric sorts
   const max = Math.max(1, ...order.map((s) => Math.abs(col(s, key))));
   rowsEl.replaceChildren();
   order.forEach((s, i) => {
