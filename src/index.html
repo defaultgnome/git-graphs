@@ -78,7 +78,6 @@ h1 { font-size: 16px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 0 16px 12px; }
 .field { display: flex; align-items: center; gap: 8px; }
 .lbl { color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.sep { width: 1px; height: 22px; background: var(--border); }
 .select { position: relative; display: inline-flex; align-items: center; }
 .select select { appearance: none; height: 32px; padding: 0 30px 0 12px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface-1); font-weight: 500; box-shadow: var(--shadow);
@@ -128,6 +127,20 @@ details .pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; 
 .pop .list label { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
 .pop .list label:hover { background: var(--surface-2); }
 .pop .list input { accent-color: var(--accent); margin: 0; }
+details.right .pop { left: auto; right: 0; }
+#opts .pop { width: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+#opts .pop .lbl { margin: 2px 2px 0; }
+#opts .toggle { width: 100%; }
+#presets summary .v { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#presets .save { display: flex; gap: 6px; margin-bottom: 8px; }
+#presets .save input { margin: 0; flex: 1; }
+#presets .save button { height: 30px; padding: 0 12px; border: none; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+#presets .pop { width: 320px; }
+#presets .row { display: flex; align-items: center; border-radius: 6px; }
+#presets .row:hover { background: var(--surface-2); }
+#presets .row.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+#presets .ld { flex: 1; min-width: 0; padding: 6px 8px; border: none; background: none; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#presets .list p { margin: 8px 6px; }
 .pop .n { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 
 /* --- kpis --- */
@@ -261,7 +274,6 @@ tr.alias em { font-style: normal; color: var(--text-muted); margin-left: 4px; }
 @media (max-width: 760px) {
   th:nth-child(n+6), td:nth-child(n+6) { display: none; }
   .segbar button span { display: none; }
-  .sep { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 </style>
@@ -302,6 +314,8 @@ tr.alias em { font-style: normal; color: var(--text-muted); margin-left: 4px; }
   <symbol id="i-pen" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></symbol>
 </svg>
 
 <header class="top">
@@ -311,13 +325,19 @@ tr.alias em { font-style: normal; color: var(--text-muted); margin-left: 4px; }
     <span class="repo"><svg class="i sm"><use href="#i-folder"/></svg><b id="repo"></b><small id="repoCount"></small></span>
   </div>
   <div class="spacer"></div>
+  <details id="presets" class="right">
+    <summary title="Saved layouts"><svg class="i"><use href="#i-bookmark"/></svg><span class="v">Saved layouts</span><svg class="i sm chev"><use href="#i-chev"/></svg></summary>
+    <div class="pop">
+      <form class="save"><input type="search" placeholder="Save current as… (same name overwrites)" aria-label="Layout name" required><button>Save</button></form>
+      <div class="list"></div>
+    </div>
+  </details>
   <button id="theme" class="icon-btn" title="Theme: system"><svg class="i"><use href="#i-monitor"/></svg></button>
 </header>
 <nav class="toolbar">
   <div class="field">
-    <span class="lbl">Metric</span>
     <span class="select">
-      <select id="metric">
+      <select id="metric" aria-label="Metric" title="Metric">
         <option value="commits">Commits</option>
         <option value="tickets">Tickets worked on</option>
         <option value="churn">LOC churn (+ / −)</option>
@@ -334,7 +354,6 @@ Cumulative: distinct tickets touched so far.
 Total layout counts a ticket shared by several people once; overlaid/stacked count it once per person."><svg class="i"><use href="#i-info"/></svg></span>
   </div>
   <div class="field">
-    <span class="lbl">Bucket</span>
     <select id="bucket" class="seg" aria-label="Bucket">
       <option value="day">Day</option>
       <option value="week">Week</option>
@@ -342,15 +361,6 @@ Total layout counts a ticket shared by several people once; overlaid/stacked cou
     </select>
   </div>
   <div class="field">
-    <span class="lbl">View</span>
-    <select id="mode" class="seg" aria-label="View">
-      <option value="bar" data-icon="bars">Bars</option>
-      <option value="line" data-icon="line">Line</option>
-      <option value="smooth" data-icon="spline">Smooth</option>
-    </select>
-  </div>
-  <div class="field">
-    <span class="lbl">Layout</span>
     <select id="layout" class="seg" aria-label="Layout">
       <option value="split" data-icon="rows">Split</option>
       <option value="overlaid" data-icon="overlay">Overlaid</option>
@@ -358,10 +368,7 @@ Total layout counts a ticket shared by several people once; overlaid/stacked cou
       <option value="total" data-icon="sigma">Total</option>
     </select>
   </div>
-  <div class="sep"></div>
   <label class="toggle"><input type="checkbox" id="cumulative">Cumulative</label>
-  <label class="toggle"><input type="checkbox" id="trend" checked>Trend</label>
-  <label class="toggle" title="Drop the oldest commit, e.g. a huge initial import"><input type="checkbox" id="skipFirst">Ignore first commit</label>
   <details id="exts">
     <summary><svg class="i"><use href="#i-file"/></svg><span class="v">Files: all</span><svg class="i sm chev"><use href="#i-chev"/></svg></summary>
     <div class="pop">
@@ -371,6 +378,20 @@ Total layout counts a ticket shared by several people once; overlaid/stacked cou
         <button class="jsts">JS/TS only</button><button class="php" title="PHP, templates, JS/TS, styles, SQL">PHP app</button><button class="nojson">No .json</button>
       </div>
       <div class="list"></div>
+    </div>
+  </details>
+  <details id="opts">
+    <summary title="More options"><svg class="i"><use href="#i-sliders"/></svg><span class="v">Options</span><svg class="i sm chev"><use href="#i-chev"/></svg></summary>
+    <div class="pop">
+      <span class="lbl">Style</span>
+      <select id="mode" class="seg" aria-label="Style">
+        <option value="bar" data-icon="bars">Bars</option>
+        <option value="line" data-icon="line">Line</option>
+        <option value="smooth" data-icon="spline">Smooth</option>
+      </select>
+      <label class="toggle"><input type="checkbox" id="trend" checked>Trend line</label>
+      <label class="toggle" title="Logarithmic Y axis; zero and negative values are not plotted. Trend becomes an exponential fit."><input type="checkbox" id="log">Log scale</label>
+      <label class="toggle" title="Drop the oldest commit, e.g. a huge initial import"><input type="checkbox" id="skipFirst">Ignore first commit</label>
     </div>
   </details>
 </nav>

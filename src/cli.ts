@@ -26,15 +26,17 @@ try {
 }
 
 // UI state persists per repo root, outside the repo:
-// { merges: {aliasEmail: rootEmail}, view: {...whatever the page saves} }
+// { merges: {aliasEmail: rootEmail}, view: {...whatever the page saves}, layouts: {name: view} }
 const root = await repoRoot(dir);
 const store = join(
   process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "ggrph",
   `${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 16)}.json`,
 );
 const isObj = (o: unknown): o is Record<string, unknown> => typeof o === "object" && o !== null && !Array.isArray(o);
-const isState = (s: unknown): s is { merges: Record<string, string>; view: Record<string, unknown> } =>
-  isObj(s) && isObj(s.merges) && Object.values(s.merges).every((v) => typeof v === "string") && isObj(s.view);
+type State = { merges: Record<string, string>; view: Record<string, unknown>; layouts: Record<string, Record<string, unknown>> };
+const isState = (s: unknown): s is State =>
+  isObj(s) && isObj(s.merges) && Object.values(s.merges).every((v) => typeof v === "string") && isObj(s.view) &&
+  isObj(s.layouts) && Object.values(s.layouts).every(isObj);
 
 // Bun resolves bundled asset URLs against cwd
 process.chdir(import.meta.dir);
@@ -50,14 +52,14 @@ const server = Bun.serve({
       GET: async () => {
         const f = Bun.file(store);
         const saved = (await f.exists()) ? await f.json().catch(() => ({})) : {};
-        return Response.json({ merges: saved.merges ?? {}, view: saved.view ?? {} });
+        return Response.json({ merges: saved.merges ?? {}, view: saved.view ?? {}, layouts: saved.layouts ?? {} });
       },
       // JSON content-type forces a CORS preflight, so other sites can't write here
       PUT: async (req) => {
         if (req.headers.get("content-type") !== "application/json") return new Response(null, { status: 415 });
         const state = await req.json().catch(() => null);
         if (!isState(state)) return new Response(null, { status: 400 });
-        await Bun.write(store, JSON.stringify({ repo: root, merges: state.merges, view: state.view }, null, 2));
+        await Bun.write(store, JSON.stringify({ repo: root, merges: state.merges, view: state.view, layouts: state.layouts }, null, 2));
         return new Response(null, { status: 204 });
       },
     },

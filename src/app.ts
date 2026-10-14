@@ -5,13 +5,13 @@ import { fuzzy } from "./fuzzy";
 type Metric = "commits" | "tickets" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
 type View = Partial<{
-  metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean; skipFirst: boolean;
+  metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean; skipFirst: boolean; log: boolean;
   zoom: [number, number] | null; hidden: string[]; excludedExts: string[]; names: Record<string, string>;
 }>;
 
 const [data, saved] = (await Promise.all(
   ["/api/data", "/api/state"].map((u) => fetch(u).then((r) => r.json())),
-)) as [Data & { repo: string }, { merges: Record<string, string>; view: View }];
+)) as [Data & { repo: string }, { merges: Record<string, string>; view: View; layouts: Record<string, View> }];
 // ponytail: NX is this team's Jira key; widen to [A-Z]+-\d+ if other projects show up (beware UTF-8, SHA-256)
 const TICKET = /\bNX-\d+\b/g;
 const raw = data.commits
@@ -30,6 +30,7 @@ const layoutEl = $<HTMLSelectElement>("layout");
 const modeEl = $<HTMLSelectElement>("mode");
 const trendEl = $<HTMLInputElement>("trend");
 const skipFirstEl = $<HTMLInputElement>("skipFirst");
+const logEl = $<HTMLInputElement>("log");
 const sideEl = $("side");
 const extsEl = $("exts");
 const rowsEl = $("rows");
@@ -37,30 +38,22 @@ const chartEl = $("chart");
 $("repo").textContent = data.repo;
 $("repoCount").textContent = `${raw.length.toLocaleString()} commits`;
 
-// --- state, restored from the per-repo file ---
-const view = saved.view;
+// --- state, restored from the per-repo file (see applyView) ---
+let view = saved.view; // last applied view; save() keeps its entries for authors/exts not in this history
 const parent = authors.map((_, i) => i); // author index -> merged root
 const byEmail = new Map(authors.map((a, i) => [a.email, i]));
 for (const [alias, root] of Object.entries(saved.merges)) {
   const i = byEmail.get(alias), r = byEmail.get(root);
   if (i !== undefined && r !== undefined) parent[i] = r;
 }
-const hidden = new Set<number>( // roots
-  (view.hidden ?? []).flatMap((e) => (byEmail.has(e) ? [parent[byEmail.get(e)!]!] : [])),
-);
+const hidden = new Set<number>(); // roots
 const expanded = new Set<number>(); // roots showing their aliases
 const names = new Map(Object.entries(view.names ?? {})); // email -> display name override
 const nameOf = (r: number) => names.get(authors[r]!.email) ?? authors[r]!.name;
-let zoom: [number, number] | null = view.zoom ?? null; // visible ms range
+let zoom: [number, number] | null = null; // visible ms range
 const restore = (el: HTMLSelectElement, v?: string) => {
   if (v && [...el.options].some((o) => o.value === v)) el.value = v;
 };
-restore(metricEl, view.metric);
-restore(layoutEl, view.layout);
-restore(modeEl, view.mode);
-cumulativeEl.checked = view.cumulative ?? false;
-trendEl.checked = view.trend ?? true;
-skipFirstEl.checked = view.skipFirst ?? false;
 
 const icon = (name: string, cls = "i") => `<svg class="${cls}"><use href="#i-${name}"/></svg>`;
 // <select class="seg"> renders as a segmented control; the hidden select stays the source of truth
@@ -125,7 +118,21 @@ function avatar(el: HTMLElement, r: number, color?: string) {
   el.style.background = color || getComputedStyle(document.documentElement).getPropertyValue("--other");
 }
 
-// entries for authors/extensions not in this history (e.g. other branches) are kept, not dropped
+// controls + filters; entries for authors/extensions not in this history (e.g. other branches) are kept, not dropped.
+// sorted so equal views stringify equal (to spot the active saved layout)
+function snapshot(): View {
+  const known = new Set(authors.map((a) => a.email));
+  const knownExt = new Set(data.exts);
+  return {
+    metric: metricEl.value, bucket: bucketEl.value, cumulative: cumulativeEl.checked, layout: layoutEl.value,
+    mode: modeEl.value, trend: trendEl.checked, skipFirst: skipFirstEl.checked, log: logEl.checked, zoom,
+    hidden: [...(view.hidden ?? []).filter((e) => !known.has(e)), ...[...hidden].map((r) => authors[r]!.email)].sort(),
+    excludedExts: [
+      ...(view.excludedExts ?? []).filter((x) => !knownExt.has(x)),
+      ...data.exts.filter((_, e) => !allowed.has(e)),
+    ].sort(),
+  };
+}
 let saveTimer: ReturnType<typeof setTimeout>;
 function save() {
   clearTimeout(saveTimer);
@@ -134,18 +141,7 @@ function save() {
       delete saved.merges[authors[i]!.email];
       if (p !== i) saved.merges[authors[i]!.email] = authors[p]!.email;
     }
-    const known = new Set(authors.map((a) => a.email));
-    const knownExt = new Set(data.exts);
-    saved.view = {
-      metric: metricEl.value, bucket: bucketEl.value, cumulative: cumulativeEl.checked, layout: layoutEl.value,
-      mode: modeEl.value, trend: trendEl.checked, skipFirst: skipFirstEl.checked, zoom,
-      hidden: [...(view.hidden ?? []).filter((e) => !known.has(e)), ...[...hidden].map((r) => authors[r]!.email)],
-      excludedExts: [
-        ...(view.excludedExts ?? []).filter((x) => !knownExt.has(x)),
-        ...data.exts.filter((_, e) => !allowed.has(e)),
-      ],
-      names: Object.fromEntries(names),
-    };
+    saved.view = { ...snapshot(), names: Object.fromEntries(names) };
     fetch("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(saved) });
   }, 300);
 }
@@ -155,8 +151,7 @@ const tMax = raw.at(-1)?.t ?? Date.now();
 
 // --- file-type filter: commits reduced to [ms, author, added, deleted, raw index] over the selected extensions ---
 // stored as exclusions so extensions new to the history default to included
-const excluded = new Set(view.excludedExts ?? []);
-const allowed = new Set([...data.exts.keys()].filter((e) => !excluded.has(data.exts[e]!)));
+const allowed = new Set<number>();
 let commits: (readonly [number, number, number, number, number])[] = [];
 function applyFilter() {
   const all = allowed.size === data.exts.length;
@@ -170,6 +165,7 @@ function applyFilter() {
     // with a filter on, a commit only counts if it touched a selected file type
     return all || hit ? [[t, a, add, del, ri] as const] : [];
   });
+  for (const b of extsEl.querySelectorAll<HTMLInputElement>(".list input")) b.checked = allowed.has(+b.value);
   const n = allowed.size;
   extsEl.querySelector("summary .v")!.textContent =
     n === data.exts.length ? "Files: all" : n === 0 ? "Files: none" :
@@ -208,11 +204,13 @@ function buildExtFilter() {
   extsEl.querySelector<HTMLButtonElement>(".jsts")!.onclick = () => pick((x) => JS_TS.includes(x));
   extsEl.querySelector<HTMLButtonElement>(".php")!.onclick = () => pick((x) => PHP.includes(x));
   extsEl.querySelector<HTMLButtonElement>(".nojson")!.onclick = () => pick((x) => x !== ".json");
-  document.addEventListener("click", (e) => { if (!extsEl.contains(e.target as Node)) extsEl.removeAttribute("open"); });
 }
+// composedPath, not contains: a click that re-renders the popover detaches its target
+document.addEventListener("click", (e) => {
+  for (const d of document.querySelectorAll("details[open]")) if (!e.composedPath().includes(d)) d.removeAttribute("open");
+});
 const DAY = 864e5;
 bucketEl.value = tMax - tMin < 90 * DAY ? "day" : tMax - tMin < 730 * DAY ? "week" : "month";
-restore(bucketEl, view.bucket);
 
 const tix = (c: readonly number[]) => raw[c[4]!]!.tix;
 // tickets aren't additive (same ticket across commits counts once), so they're counted via sets, not value()
@@ -319,19 +317,20 @@ function series(m: Metric, b: Bucket, cumulative: boolean) {
   return { buckets, per, total };
 }
 
-// least-squares line over the buckets inside the zoom window
-function fit(pts: number[][]) {
+// least-squares line over the buckets inside the zoom window; on a log axis, fit log10(v) (exponential trend)
+function fit(pts: (number | null)[][]) {
   const [z0, z1] = zoom ?? [-Infinity, Infinity];
-  const p = pts.filter(([t]) => t! >= z0 && t! <= z1);
+  const log = logEl.checked;
+  const p = pts.filter(([t, v]) => t! >= z0 && t! <= z1 && (!log || v! > 0)).map(([t, v]) => [t!, log ? Math.log10(v!) : v!]);
   if (p.length < 2) return [];
   const mx = p.reduce((s, [t]) => s + t!, 0) / p.length;
   const my = p.reduce((s, [, v]) => s + v!, 0) / p.length;
   let sxy = 0, sxx = 0;
   for (const [t, v] of p) { sxy += (t! - mx) * (v! - my); sxx += (t! - mx) ** 2; }
   const k = sxx ? sxy / sxx : 0;
-  return [p[0]!, p.at(-1)!].map(([t]) => [t!, my + k * (t! - mx)]);
+  return [p[0]!, p.at(-1)!].map(([t]) => [t!, log ? 10 ** (my + k * (t! - mx)) : my + k * (t! - mx)]);
 }
-let trends: { id: string; pts: number[][] }[] = [];
+let trends: { id: string; pts: (number | null)[][] }[] = [];
 let splitRoots: number[] = []; // author root per grid in split layout
 
 const chart = echarts.init(chartEl);
@@ -340,6 +339,7 @@ chart.on("datazoom", () => {
   zoom = [dz.startValue, dz.endValue];
   if (trends.length) chart.setOption({ series: trends.map((t) => ({ id: t.id, data: fit(t.pts) })) });
   renderBoard();
+  renderPresets();
   save();
 });
 // click anywhere in a plot: list the commits of the nearest bucket (of that row's author in split layout)
@@ -376,6 +376,7 @@ function renderChart() {
   const v = (k: string) => css.getPropertyValue(k).trim();
   const accent = v("--accent"), soft = v("--accent-soft");
   const mode = modeEl.value;
+  const log = logEl.checked; // log axis can't place 0 or negatives: leave those buckets unplotted
   // vertical fade under a line, from the series colour to transparent
   const fade = (hex: string, a = 0.28) => {
     const [r, g, bl] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -383,7 +384,7 @@ function renderChart() {
       { offset: 0, color: `rgba(${r},${g},${bl},${a})` }, { offset: 1, color: `rgba(${r},${g},${bl},0)` },
     ]);
   };
-  const pts = (arr: number[]) => arr.map((v, i) => [buckets[i]!, v]);
+  const pts = (arr: number[]) => arr.map((v, i) => [buckets[i]!, log && v <= 0 ? null : v]);
   const line = (name: string, arr: number[], color: string, extra: object = {}) => ({
     name, type: mode === "bar" ? "bar" : "line", data: pts(arr), color, emphasis: { focus: "series" },
     ...(mode === "bar"
@@ -393,11 +394,12 @@ function renderChart() {
   });
   // dashed fit sharing its series' name, so the legend toggles both; kept out of the tooltip
   trends = [];
-  const trend = (name: string, arr: number[], color: string, axis = 0) => {
+  const trend = (name: string, arr: (number | null)[], color: string, axis = 0) => {
     const id = `trend${trends.length}`;
-    trends.push({ id, pts: pts(arr) });
+    const p = arr.map((v, i) => [buckets[i]!, v]);
+    trends.push({ id, pts: p });
     return {
-      id, name, type: "line", data: fit(pts(arr)), color, xAxisIndex: axis, yAxisIndex: axis, symbol: "none", silent: true,
+      id, name, type: "line", data: fit(p), color, xAxisIndex: axis, yAxisIndex: axis, symbol: "none", silent: true,
       z: 5, lineStyle: { type: [6, 4], width: 1.5, opacity: 0.9 }, tooltip: { show: false }, emphasis: { disabled: true },
     };
   };
@@ -406,7 +408,7 @@ function renderChart() {
     axisLine: { lineStyle: { color: grid } }, axisTick: { show: false }, axisLabel: { color: muted, hideOverlap: true, fontSize: 11 },
     splitLine: { lineStyle: { color: grid, type: [4, 4] } },
   };
-  const yCommon = { ...axisCommon, axisLine: { show: false }, axisLabel: { ...axisCommon.axisLabel, formatter: compact } };
+  const yCommon = { type: log ? "log" : "value", ...axisCommon, axisLine: { show: false }, axisLabel: { ...axisCommon.axisLabel, formatter: compact } };
   const slider = {
     type: "slider", height: 26, borderColor: "transparent", backgroundColor: v("--surface-2"),
     fillerColor: soft, borderRadius: 8, showDetail: false,
@@ -419,7 +421,7 @@ function renderChart() {
   const zoomRange = zoom ? { startValue: zoom[0], endValue: zoom[1] } : {};
   const tooltip = {
     trigger: "axis", order: "valueDesc", confine: true,
-    valueFormatter: (x: number) => x?.toLocaleString(),
+    valueFormatter: (x: number | null) => x?.toLocaleString() ?? "–",
     backgroundColor: v("--surface-1"), borderColor: grid, borderWidth: 1, padding: [8, 12],
     textStyle: { color: v("--text-primary"), fontSize: 12 },
     extraCssText: "border-radius:10px;box-shadow:" + v("--shadow-pop"),
@@ -434,8 +436,13 @@ function renderChart() {
     const shown = (splitRoots = ranked.slice(0, 50));
     const ROW = 110, TOP = 56;
     chartEl.style.height = `${TOP + shown.length * ROW + 30}px`;
-    let lo = 0, hi = 0;
-    for (const r of shown) for (const v of per.get(r)!) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    // one shared y scale; on log, from the smallest positive value, snapped to powers of 10
+    let lo = log ? Infinity : 0, hi = 0;
+    for (const r of shown) for (const v of per.get(r)!) { if (!log || v > 0) lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (log) {
+      lo = lo === Infinity ? 1 : 10 ** Math.floor(Math.log10(lo));
+      hi = 10 ** Math.ceil(Math.log10(Math.max(hi, lo * 10)));
+    }
     const all = shown.map((_, i) => i);
     opt = {
       animation: false,
@@ -451,7 +458,7 @@ function renderChart() {
         type: "time", gridIndex: i, ...(mode === "bar" ? {} : { min: buckets[0], max: buckets.at(-1) }),
         ...axisCommon, splitLine: { show: false },
       })),
-      yAxis: shown.map((_, i) => ({ type: "value", gridIndex: i, min: lo, max: hi, splitNumber: 2, ...yCommon })),
+      yAxis: shown.map((_, i) => ({ gridIndex: i, min: lo, max: hi, splitNumber: 2, ...yCommon })),
       dataZoom: [
         { ...slider, xAxisIndex: all, top: 10, ...zoomRange },
         { type: "inside", xAxisIndex: all, zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false, ...zoomRange },
@@ -497,7 +504,7 @@ function renderChart() {
       },
       grid: { top: legend ? 52 : 24, left: 56, right: 24, bottom: 64 },
       xAxis: { type: "time", ...axisCommon, splitLine: { show: false } },
-      yAxis: { type: "value", ...yCommon },
+      yAxis: yCommon,
       dataZoom: [
         { ...slider, bottom: 14, ...zoomRange },
         { type: "inside", ...zoomRange },
@@ -741,11 +748,67 @@ function renderSide() {
 $("sideClose").onclick = () => { side = null; renderSide(); };
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && side && !popEl.matches(":popover-open")) { side = null; renderSide(); } });
 
+// --- saved layouts: named snapshots of controls + filters, kept per repo next to merges ---
+const presetsEl = $("presets");
+const presetList = presetsEl.querySelector<HTMLElement>(".list")!;
+const presetName = presetsEl.querySelector("input")!;
+presetsEl.querySelector("form")!.onsubmit = (e) => {
+  e.preventDefault();
+  const name = presetName.value.trim();
+  if (!name) return;
+  saved.layouts[name] = snapshot();
+  presetName.value = "";
+  render();
+  toast(`${icon("bookmark")}<span></span>`);
+  toastEl.lastElementChild!.textContent = `Saved layout “${name}”`;
+};
+function renderPresets() {
+  const cur = JSON.stringify(snapshot());
+  const all = Object.keys(saved.layouts).sort((a, b) => a.localeCompare(b));
+  const active = all.find((n) => JSON.stringify(saved.layouts[n]) === cur);
+  presetsEl.querySelector("summary .v")!.textContent = active ?? "Saved layouts";
+  presetList.replaceChildren(...all.map((n) => {
+    const row = document.createElement("div");
+    row.className = "row" + (n === active ? " on" : "");
+    row.innerHTML = `<button class="ld"></button><button class="x" title="Delete">${icon("x", "i sm")}</button>`;
+    const [ld, x] = row.children as unknown as [HTMLButtonElement, HTMLButtonElement];
+    ld.textContent = n;
+    ld.onclick = () => { applyView(saved.layouts[n]!); presetsEl.removeAttribute("open"); render(); };
+    x.onclick = () => { if (confirm(`Delete saved layout “${n}”?`)) { delete saved.layouts[n]; render(); } };
+    return row;
+  }));
+  if (!all.length) presetList.innerHTML = `<p class="dim">No saved layouts yet</p>`;
+}
+
+// startup state or a saved layout → controls + filters; missing keys keep defaults
+function applyView(v: View) {
+  view = v;
+  for (const [el, x] of [[metricEl, v.metric], [bucketEl, v.bucket], [layoutEl, v.layout], [modeEl, v.mode]] as const) restore(el, x);
+  cumulativeEl.checked = v.cumulative ?? false;
+  trendEl.checked = v.trend ?? true;
+  skipFirstEl.checked = v.skipFirst ?? false;
+  logEl.checked = v.log ?? false;
+  zoom = v.zoom ?? null;
+  hidden.clear();
+  for (const e of v.hidden ?? []) if (byEmail.has(e)) hidden.add(parent[byEmail.get(e)!]!);
+  const excluded = new Set(v.excludedExts ?? []);
+  allowed.clear();
+  data.exts.forEach((x, e) => { if (!excluded.has(x)) allowed.add(e); });
+  boardSort.k = sideSort.k = "";
+  boardSort.asc = sideSort.asc = false;
+  syncHint();
+  applyFilter();
+}
+
+const optsEl = $("opts");
 function render() {
   for (const sync of segs) sync();
+  optsEl.querySelector("summary .v")!.textContent = [modeEl.selectedOptions[0]!.text, trendEl.checked && "Trend",
+    logEl.checked && "Log", skipFirstEl.checked && "No 1st commit"].filter(Boolean).join(" · ");
   renderChart();
   renderBoard();
   renderSide();
+  renderPresets();
   save();
 }
 
@@ -753,11 +816,10 @@ const boardEl = rowsEl.closest("table")!;
 bindSort(boardEl.tHead!, boardSort, boardKey, renderBoard);
 bindSort(sideTable.tHead!, sideSort, sideKey, renderSide);
 const syncHint = () => ($("ticketHint").hidden = metricEl.value !== "tickets");
-syncHint();
 metricEl.onchange = () => { syncHint(); boardSort.k = sideSort.k = ""; boardSort.asc = sideSort.asc = false; render(); };
-for (const el of [bucketEl, cumulativeEl, layoutEl, modeEl, trendEl]) el.onchange = render;
+for (const el of [bucketEl, cumulativeEl, layoutEl, modeEl, trendEl, logEl]) el.onchange = render;
 skipFirstEl.onchange = () => { applyFilter(); render(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 buildExtFilter();
-applyFilter();
+applyView(saved.view);
 render();
