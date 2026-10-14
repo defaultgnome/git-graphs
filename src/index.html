@@ -100,6 +100,9 @@ h1 { font-size: 16px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
 .toggle input:checked { background: var(--accent); }
 .toggle input:checked::after { translate: 12px 0; }
 .toggle:has(input:checked) { color: var(--text-primary); }
+.dates input { height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--text-primary); box-shadow: var(--shadow); font: inherit; color-scheme: light dark; }
+.dates input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tip { display: inline-grid; color: var(--text-muted); cursor: help; }
 .tip:hover { color: var(--accent); }
 
@@ -367,6 +370,9 @@ Total layout counts a ticket shared by several people once; overlaid/stacked cou
       <option value="stacked" data-icon="area">Stacked</option>
       <option value="total" data-icon="sigma">Total</option>
     </select>
+  </div>
+  <div class="field dates" title="Visible date range; also set by dragging the slider">
+    <input type="date" id="from" aria-label="From date"><span class="lbl">→</span><input type="date" id="to" aria-label="To date">
   </div>
   <label class="toggle"><input type="checkbox" id="cumulative">Cumulative</label>
   <details id="exts">

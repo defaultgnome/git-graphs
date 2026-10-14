@@ -210,6 +210,7 @@ document.addEventListener("click", (e) => {
   for (const d of document.querySelectorAll("details[open]")) if (!e.composedPath().includes(d)) d.removeAttribute("open");
 });
 const DAY = 864e5;
+const fmtDate = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 bucketEl.value = tMax - tMin < 90 * DAY ? "day" : tMax - tMin < 730 * DAY ? "week" : "month";
 
 const tix = (c: readonly number[]) => raw[c[4]!]!.tix;
@@ -333,10 +334,26 @@ function fit(pts: (number | null)[][]) {
 let trends: { id: string; pts: (number | null)[][] }[] = [];
 let splitRoots: number[] = []; // author root per grid in split layout
 
+// date inputs mirror the zoom window; typing a date zooms the chart
+const fromEl = $<HTMLInputElement>("from"), toEl = $<HTMLInputElement>("to");
+fromEl.min = toEl.min = fmtDate(raw[0]?.t ?? Date.now());
+fromEl.max = toEl.max = fmtDate(raw.at(-1)?.t ?? Date.now());
+const syncDates = () => {
+  fromEl.value = zoom ? fmtDate(zoom[0]) : fromEl.min;
+  toEl.value = zoom ? fmtDate(zoom[1]) : toEl.max;
+};
+fromEl.onchange = toEl.onchange = () => {
+  const a = new Date(`${fromEl.value || fromEl.min}T00:00`).getTime();
+  const b = new Date(`${toEl.value || toEl.max}T23:59:59.999`).getTime();
+  zoom = a <= b ? [a, b] : [b, a];
+  render();
+};
+
 const chart = echarts.init(chartEl);
 chart.on("datazoom", () => {
   const dz = (chart.getOption() as any).dataZoom[0];
   zoom = [dz.startValue, dz.endValue];
+  syncDates();
   if (trends.length) chart.setOption({ series: trends.map((t) => ({ id: t.id, data: fit(t.pts) })) });
   renderBoard();
   renderPresets();
@@ -517,7 +534,6 @@ function renderChart() {
 }
 
 const compact = (n: number) => Intl.NumberFormat("en", { notation: "compact" }).format(n);
-const fmtDate = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 
 function renderBoard() {
   const m = metricEl.value as Metric;
@@ -803,6 +819,7 @@ function applyView(v: View) {
 const optsEl = $("opts");
 function render() {
   for (const sync of segs) sync();
+  syncDates();
   optsEl.querySelector("summary .v")!.textContent = [modeEl.selectedOptions[0]!.text, trendEl.checked && "Trend",
     logEl.checked && "Log", skipFirstEl.checked && "No 1st commit"].filter(Boolean).join(" · ");
   renderChart();
