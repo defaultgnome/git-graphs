@@ -17,21 +17,23 @@ if (values.help) {
 
 const dir = resolve(positionals[0] ?? ".");
 console.log(`ggrph: reading history of ${dir}…`);
+// UI state persists per repo root, outside the repo:
+// { merges: {aliasEmail: rootEmail}, view: {...whatever the page saves}, layouts: {name: view} }
+// next to it, <key>.log caches the raw git log
+const root = await repoRoot(dir);
+const key = join(
+  process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "ggrph",
+  new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 16),
+);
+const store = `${key}.json`;
+
 let data;
 try {
-  data = await readRepo(dir, [...DEFAULT_EXCLUDES, ...values.exclude!]);
+  data = await readRepo(dir, [...DEFAULT_EXCLUDES, ...values.exclude!], `${key}.log`);
 } catch (e) {
   console.error(`ggrph: ${dir}: ${(e as Error).message}`);
   process.exit(1);
 }
-
-// UI state persists per repo root, outside the repo:
-// { merges: {aliasEmail: rootEmail}, view: {...whatever the page saves}, layouts: {name: view} }
-const root = await repoRoot(dir);
-const store = join(
-  process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "ggrph",
-  `${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 16)}.json`,
-);
 const isObj = (o: unknown): o is Record<string, unknown> => typeof o === "object" && o !== null && !Array.isArray(o);
 type State = { merges: Record<string, string>; view: Record<string, unknown>; layouts: Record<string, Record<string, unknown>> };
 const isState = (s: unknown): s is State =>

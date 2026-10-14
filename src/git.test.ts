@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { DEFAULT_EXCLUDES, extOf, parseLog } from "./git";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DEFAULT_EXCLUDES, LOG_FORMAT, extOf, parseLog, readRepo } from "./git";
 
 const log = [
   "\x001700000000\tAlice@X.com\tAlice\tabc123\tfix: a\tb",
@@ -39,4 +41,16 @@ test("parseLog", () => {
 
 test("extOf", () => {
   expect(["a/b.TSX", "Makefile", "x/.gitignore", "a.min.js"].map(extOf)).toEqual([".tsx", "Makefile", ".gitignore", ".js"]);
+});
+
+test("readRepo matches serial git log, cold and cached", async () => {
+  const dir = import.meta.dir;
+  const out = await new Response(
+    Bun.spawn(["git", "-C", dir, "-c", "core.quotePath=off", "log", "--no-merges", "--numstat", `--format=${LOG_FORMAT}`]).stdout,
+  ).text();
+  const ref = parseLog(out, DEFAULT_EXCLUDES);
+  const cache = join(tmpdir(), `ggrph-test-${process.pid}.log`);
+  expect(await readRepo(dir, DEFAULT_EXCLUDES, cache)).toEqual(ref);
+  expect(await readRepo(dir, DEFAULT_EXCLUDES, cache)).toEqual(ref);
+  await Bun.file(cache).delete();
 });

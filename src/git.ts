@@ -70,16 +70,47 @@ export function parseLog(text: string, excludes: string[]): Data {
   return { authors, exts, commits, info };
 }
 
-export async function readRepo(dir: string, excludes: string[]): Promise<Data> {
-  const proc = Bun.spawn(
-    ["git", "-C", dir, "-c", "core.quotePath=off", "log", "--no-merges", "--numstat", `--format=${LOG_FORMAT}`],
-    { stdout: "pipe", stderr: "pipe" },
-  );
+async function git(dir: string, args: string[], stdin?: string) {
+  const proc = Bun.spawn(["git", "-C", dir, "-c", "core.quotePath=off", ...args], {
+    stdin: stdin === undefined ? "ignore" : new Blob([stdin]), stdout: "pipe", stderr: "pipe",
+  });
   const [out, err, code] = await Promise.all([
     new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
   ]);
-  if (code !== 0) throw new Error(err.trim() || `git log exited ${code}`);
-  return parseLog(out, excludes);
+  if (code !== 0) throw new Error(err.trim() || `git ${args[0]} exited ${code}`);
+  return out;
+}
+
+// git log --numstat is single-threaded and diff-bound: run chunks in parallel (4 per core evens out big commits)
+async function logRange(dir: string, range: string) {
+  const shas = (await git(dir, ["rev-list", "--no-merges", range])).split("\n").filter(Boolean);
+  const size = Math.ceil(shas.length / (navigator.hardwareConcurrency * 4));
+  const chunks = [];
+  for (let i = 0; i < shas.length; i += size) chunks.push(shas.slice(i, i + size));
+  const parts = await Promise.all(chunks.map((c) =>
+    git(dir, ["log", "--no-walk=unsorted", "--stdin", "--numstat", `--format=${LOG_FORMAT}`], c.join("\n") + "\n")));
+  return parts.join("");
+}
+
+// cache = "<head sha>\n<raw log>"; raw (not parsed) so excludes can change without a refetch
+export async function readRepo(dir: string, excludes: string[], cachePath: string): Promise<Data> {
+  const head = (await git(dir, ["rev-parse", "HEAD"])).trim();
+  const f = Bun.file(cachePath);
+  let old = "", range = head;
+  if (await f.exists()) {
+    const text = await f.text();
+    const nl = text.indexOf("\n");
+    const sha = text.slice(0, nl);
+    if (sha === head) return parseLog(text.slice(nl + 1), excludes);
+    // rewritten history (rebase, reset) → refetch everything
+    if (await git(dir, ["merge-base", "--is-ancestor", sha, head]).then(() => true, () => false)) {
+      old = text.slice(nl + 1);
+      range = `${sha}..${head}`;
+    }
+  }
+  const log = (await logRange(dir, range)) + old;
+  await Bun.write(cachePath, `${head}\n${log}`);
+  return parseLog(log, excludes);
 }
 
 export async function repoRoot(dir: string) {
