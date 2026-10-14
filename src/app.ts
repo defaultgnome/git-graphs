@@ -173,6 +173,8 @@ function applyFilter() {
 }
 
 const JS_TS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+// hand-written code in a typical PHP app: PHP + templates + its front-end + SQL; drops lockfiles, json/xml/yaml, docs, assets
+const PHP = [".php", ".phtml", ".inc", ".twig", ".tpl", ".sql", ...JS_TS, ".vue", ".css", ".scss", ".less"];
 function buildExtFilter() {
   const churn = data.exts.map(() => 0);
   for (const { files } of raw) for (let i = 0; i < files.length; i += 3) churn[files[i]!] += files[i + 1]! + files[i + 2]!;
@@ -200,6 +202,7 @@ function buildExtFilter() {
   extsEl.querySelector<HTMLButtonElement>(".all")!.onclick = () => pick(() => true);
   extsEl.querySelector<HTMLButtonElement>(".none")!.onclick = () => pick(() => false);
   extsEl.querySelector<HTMLButtonElement>(".jsts")!.onclick = () => pick((x) => JS_TS.includes(x));
+  extsEl.querySelector<HTMLButtonElement>(".php")!.onclick = () => pick((x) => PHP.includes(x));
   extsEl.querySelector<HTMLButtonElement>(".nojson")!.onclick = () => pick((x) => x !== ".json");
   document.addEventListener("click", (e) => { if (!extsEl.contains(e.target as Node)) extsEl.removeAttribute("open"); });
 }
