@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { DEFAULT_EXCLUDES, extOf, parseLog } from "./git";
 
 const log = [
-  "\x001700000000\tAlice@X.com\tAlice",
+  "\x001700000000\tAlice@X.com\tAlice\tabc123\tfix: a\tb",
   "",
   "10\t2\tsrc/a.ts",
   "500\t0\tpackage-lock.json",
@@ -33,6 +33,8 @@ test("parseLog", () => {
     [1700000200, 0],
     [1700000300, 0],
   ]);
+  expect(d.info[0]).toEqual(["abc123", "fix: a\tb"]);
+  expect(d.info[1]).toEqual(["", ""]);
 });
 
 test("extOf", () => {

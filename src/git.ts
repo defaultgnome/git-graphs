@@ -6,9 +6,10 @@ export const DEFAULT_EXCLUDES = [
 export type Author = { email: string; name: string };
 // [unix seconds, author index, ...(ext index, lines added, lines deleted) per file type touched]
 export type Commit = number[];
-export type Data = { authors: Author[]; exts: string[]; commits: Commit[] };
+// info[i] = [short hash, subject] of commits[i]
+export type Data = { authors: Author[]; exts: string[]; commits: Commit[]; info: [string, string][] };
 
-export const LOG_FORMAT = "%x00%at%x09%aE%x09%aN";
+export const LOG_FORMAT = "%x00%at%x09%aE%x09%aN%x09%h%x09%s";
 
 // gitignore-ish: a pattern without "/" matches at any depth
 const toGlob = (p: string) => new Bun.Glob(p.startsWith("/") ? p.slice(1) : `**/${p}`);
@@ -29,13 +30,14 @@ export function parseLog(text: string, excludes: string[]): Data {
   const authors: Author[] = [];
   const byEmail = new Map<string, { i: number; names: Map<string, number> }>();
   const commits: Commit[] = [];
+  const info: [string, string][] = [];
   const exts: string[] = [];
   const extIdx = new Map<string, number>();
 
   for (const block of text.split("\0")) {
     if (!block.trim()) continue;
     const [header, ...lines] = block.split("\n");
-    const [t, rawEmail, name] = header!.split("\t");
+    const [t, rawEmail, name, hash = "", ...subject] = header!.split("\t");
     const email = rawEmail!.toLowerCase();
     let a = byEmail.get(email);
     if (!a) {
@@ -59,12 +61,13 @@ export function parseLog(text: string, excludes: string[]): Data {
       sum[1] += +de!;
       perExt.set(e, sum);
     }
+    info.push([hash, subject.join("\t")]);
     commits.push([+t!, a.i, ...[...perExt].flatMap(([e, [ad, de]]) => [e, ad, de])]);
   }
 
   for (const [, a] of byEmail)
     authors[a.i]!.name = [...a.names].sort((x, y) => y[1] - x[1])[0]![0];
-  return { authors, exts, commits };
+  return { authors, exts, commits, info };
 }
 
 export async function readRepo(dir: string, excludes: string[]): Promise<Data> {

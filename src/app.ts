@@ -4,14 +4,16 @@ import type { Data } from "./git";
 type Metric = "commits" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
 type View = Partial<{
-  metric: string; bucket: string; cumulative: boolean; layout: string;
+  metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean;
   zoom: [number, number] | null; hidden: string[]; excludedExts: string[];
 }>;
 
 const [data, saved] = (await Promise.all(
   ["/api/data", "/api/state"].map((u) => fetch(u).then((r) => r.json())),
 )) as [Data & { repo: string }, { merges: Record<string, string>; view: View }];
-const raw = data.commits.map(([t, a, ...files]) => ({ t: t! * 1000, a: a!, files })).sort((x, y) => x.t - y.t);
+const raw = data.commits
+  .map(([t, a, ...files], i) => ({ t: t! * 1000, a: a!, files, info: data.info[i] ?? ["", ""] }))
+  .sort((x, y) => x.t - y.t);
 const authors = data.authors;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -19,6 +21,9 @@ const metricEl = $<HTMLSelectElement>("metric");
 const bucketEl = $<HTMLSelectElement>("bucket");
 const cumulativeEl = $<HTMLInputElement>("cumulative");
 const layoutEl = $<HTMLSelectElement>("layout");
+const modeEl = $<HTMLSelectElement>("mode");
+const trendEl = $<HTMLInputElement>("trend");
+const sideEl = $("side");
 const extsEl = $("exts");
 const rowsEl = $("rows");
 const chartEl = $("chart");
@@ -42,7 +47,9 @@ const restore = (el: HTMLSelectElement, v?: string) => {
 };
 restore(metricEl, view.metric);
 restore(layoutEl, view.layout);
+restore(modeEl, view.mode);
 cumulativeEl.checked = view.cumulative ?? false;
+trendEl.checked = view.trend ?? true;
 
 // entries for authors/extensions not in this history (e.g. other branches) are kept, not dropped
 let saveTimer: ReturnType<typeof setTimeout>;
@@ -56,7 +63,8 @@ function save() {
     const known = new Set(authors.map((a) => a.email));
     const knownExt = new Set(data.exts);
     saved.view = {
-      metric: metricEl.value, bucket: bucketEl.value, cumulative: cumulativeEl.checked, layout: layoutEl.value, zoom,
+      metric: metricEl.value, bucket: bucketEl.value, cumulative: cumulativeEl.checked, layout: layoutEl.value,
+      mode: modeEl.value, trend: trendEl.checked, zoom,
       hidden: [...(view.hidden ?? []).filter((e) => !known.has(e)), ...[...hidden].map((r) => authors[r]!.email)],
       excludedExts: [
         ...(view.excludedExts ?? []).filter((x) => !knownExt.has(x)),
@@ -70,21 +78,21 @@ function save() {
 const tMin = raw[0]?.t ?? Date.now();
 const tMax = raw.at(-1)?.t ?? Date.now();
 
-// --- file-type filter: commits reduced to [ms, author, added, deleted] over the selected extensions ---
+// --- file-type filter: commits reduced to [ms, author, added, deleted, raw index] over the selected extensions ---
 // stored as exclusions so extensions new to the history default to included
 const excluded = new Set(view.excludedExts ?? []);
 const allowed = new Set([...data.exts.keys()].filter((e) => !excluded.has(data.exts[e]!)));
-let commits: (readonly [number, number, number, number])[] = [];
+let commits: (readonly [number, number, number, number, number])[] = [];
 function applyFilter() {
   const all = allowed.size === data.exts.length;
-  commits = raw.flatMap(({ t, a, files }) => {
+  commits = raw.flatMap(({ t, a, files }, ri) => {
     let add = 0, del = 0, hit = false;
     for (let i = 0; i < files.length; i += 3) {
       if (!allowed.has(files[i]!)) continue;
       hit = true; add += files[i + 1]!; del += files[i + 2]!;
     }
     // with a filter on, a commit only counts if it touched a selected file type
-    return all || hit ? [[t, a, add, del] as const] : [];
+    return all || hit ? [[t, a, add, del, ri] as const] : [];
   });
   const n = allowed.size;
   extsEl.querySelector("summary")!.textContent =
@@ -143,6 +151,32 @@ function nextBucket(ms: number, b: Bucket) {
 const roots = () => parent.filter((p, i) => p === i);
 const aliases = (r: number) => parent.flatMap((p, i) => (p === r && i !== r ? [i] : []));
 
+// header-click sorting; an empty key follows the metric picked at the top
+type Sort = { k: string; asc: boolean };
+const METRIC_KEY: Record<Metric, string> = { commits: "commits", added: "add", deleted: "del", net: "net", churn: "churn" };
+const boardSort: Sort = { k: "", asc: false };
+const sideSort: Sort = { k: "", asc: false };
+const boardKey = () => boardSort.k || METRIC_KEY[metricEl.value as Metric];
+const sideKey = () => sideSort.k || (metricEl.value === "commits" ? "churn" : METRIC_KEY[metricEl.value as Metric]);
+type Row = { add: number; del: number } & Record<string, number>;
+const col = (x: Row, k: string) => (k === "net" ? x.add - x.del : k === "churn" ? x.add + x.del : x[k]!);
+function sortRows<T extends Row>(items: T[], s: Sort, k: string, thead: HTMLElement) {
+  for (const th of thead.querySelectorAll<HTMLElement>("th[data-k]")) {
+    th.classList.toggle("on", th.dataset.k === k);
+    th.classList.toggle("asc", th.dataset.k === k && s.asc);
+  }
+  return items.sort((a, b) => (s.asc ? 1 : -1) * (col(a, k) - col(b, k)));
+}
+function bindSort(thead: HTMLElement, s: Sort, current: () => string, rerender: () => void) {
+  thead.onclick = (e) => {
+    const k = (e.target as HTMLElement).closest("th")?.dataset.k;
+    if (!k) return;
+    s.asc = current() === k ? !s.asc : false;
+    s.k = k;
+    rerender();
+  };
+}
+
 // all-time rank by |metric|, ignoring zoom and hidden rows, so hiding/zooming never repaints anyone
 function rank(m: Metric) {
   const tot = new Map<number, number>();
@@ -172,12 +206,45 @@ function series(m: Metric, b: Bucket, cumulative: boolean) {
   return { buckets, per };
 }
 
+// least-squares line over the buckets inside the zoom window
+function fit(pts: number[][]) {
+  const [z0, z1] = zoom ?? [-Infinity, Infinity];
+  const p = pts.filter(([t]) => t! >= z0 && t! <= z1);
+  if (p.length < 2) return [];
+  const mx = p.reduce((s, [t]) => s + t!, 0) / p.length;
+  const my = p.reduce((s, [, v]) => s + v!, 0) / p.length;
+  let sxy = 0, sxx = 0;
+  for (const [t, v] of p) { sxy += (t! - mx) * (v! - my); sxx += (t! - mx) ** 2; }
+  const k = sxx ? sxy / sxx : 0;
+  return [p[0]!, p.at(-1)!].map(([t]) => [t!, my + k * (t! - mx)]);
+}
+let trends: { id: string; pts: number[][] }[] = [];
+let splitRoots: number[] = []; // author root per grid in split layout
+
 const chart = echarts.init(chartEl);
 chart.on("datazoom", () => {
   const dz = (chart.getOption() as any).dataZoom[0];
   zoom = [dz.startValue, dz.endValue];
+  if (trends.length) chart.setOption({ series: trends.map((t) => ({ id: t.id, data: fit(t.pts) })) });
   renderBoard();
   save();
+});
+// click anywhere in a plot: list the commits of the nearest bucket (of that row's author in split layout)
+chart.getZr().on("click", (e) => {
+  const pt = [e.offsetX, e.offsetY];
+  const split = layoutEl.value === "split";
+  for (let i = 0; i < (split ? splitRoots.length : 1); i++) {
+    if (!chart.containPixel({ gridIndex: i }, pt)) continue;
+    const t = (chart.convertFromPixel({ gridIndex: i }, pt) as number[])[0]!;
+    const b = bucketEl.value as Bucket;
+    const b0 = floorTo(t, b), b1 = nextBucket(b0, b);
+    const from = t - b0 < b1 - t ? b0 : b1;
+    // a cumulative point is the sum of everything up to it
+    side = { from: cumulativeEl.checked ? -Infinity : from, to: nextBucket(from, b), root: split ? splitRoots[i]! : null };
+    sideSort.k = "";
+    renderSide();
+    return;
+  }
 });
 new ResizeObserver(() => chart.resize()).observe(chartEl.parentElement!);
 
@@ -193,10 +260,24 @@ function renderChart() {
   const muted = css.getPropertyValue("--text-muted").trim();
   const grid = css.getPropertyValue("--border").trim();
   const other = css.getPropertyValue("--other").trim();
-  const pts = (arr: number[]) => arr.map((v, i) => [buckets[i], v]);
+  const mode = modeEl.value;
+  const pts = (arr: number[]) => arr.map((v, i) => [buckets[i]!, v]);
   const line = (name: string, arr: number[], color: string, extra: object = {}) => ({
-    name, type: "line", data: pts(arr), color, showSymbol: false, lineStyle: { width: 2 }, emphasis: { focus: "series" }, ...extra,
+    name, type: mode === "bar" ? "bar" : "line", data: pts(arr), color, emphasis: { focus: "series" },
+    ...(mode === "bar" ? { barMaxWidth: 24 } : { showSymbol: false, smooth: mode === "smooth", lineStyle: { width: 2 } }),
+    ...extra,
   });
+  // dashed fit sharing its series' name, so the legend toggles both; kept out of the tooltip
+  trends = [];
+  const trend = (name: string, arr: number[], color: string, axis = 0) => {
+    const id = `trend${trends.length}`;
+    trends.push({ id, pts: pts(arr) });
+    return {
+      id, name, type: "line", data: fit(pts(arr)), color, xAxisIndex: axis, yAxisIndex: axis, symbol: "none", silent: true,
+      z: 5, lineStyle: { type: "dashed", width: 1.5 }, tooltip: { show: false }, emphasis: { disabled: true },
+    };
+  };
+  const withTrend = trendEl.checked;
   const axisCommon = {
     axisLine: { lineStyle: { color: grid } }, axisLabel: { color: muted, hideOverlap: true },
     splitLine: { lineStyle: { color: grid } },
@@ -210,7 +291,7 @@ function renderChart() {
   let opt: any;
   if (layout === "split") {
     // ponytail: one canvas, 50-row cap keeps it under browser canvas height limits
-    const shown = ranked.slice(0, 50);
+    const shown = (splitRoots = ranked.slice(0, 50));
     const ROW = 110, TOP = 56;
     chartEl.style.height = `${TOP + shown.length * ROW + 30}px`;
     let lo = 0, hi = 0;
@@ -224,23 +305,30 @@ function renderChart() {
         textStyle: { fontSize: 12, fontWeight: 500, color: ink },
       })),
       grid: shown.map((_, i) => ({ top: TOP + i * ROW + 18, height: ROW - 46, left: 56, right: 24 })),
-      xAxis: shown.map((_, i) => ({ type: "time", gridIndex: i, min: buckets[0], max: buckets.at(-1), ...axisCommon, splitLine: { show: false } })),
+      // bars sit centred on the bucket start; let echarts pad the axis so the edge ones aren't cut in half
+      xAxis: shown.map((_, i) => ({
+        type: "time", gridIndex: i, ...(mode === "bar" ? {} : { min: buckets[0], max: buckets.at(-1) }),
+        ...axisCommon, splitLine: { show: false },
+      })),
       yAxis: shown.map((_, i) => ({ type: "value", gridIndex: i, min: lo, max: hi, splitNumber: 2, ...axisCommon })),
       dataZoom: [
         { type: "slider", xAxisIndex: all, top: 8, height: 24, ...zoomRange },
         { type: "inside", xAxisIndex: all, zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false, ...zoomRange },
       ],
-      series: shown.map((r, i) => line(authors[r]!.name, per.get(r)!, colors.get(r)!, {
-        xAxisIndex: i, yAxisIndex: i, areaStyle: { opacity: 0.15 },
-      })),
+      series: [
+        ...shown.map((r, i) => line(authors[r]!.name, per.get(r)!, colors.get(r)!, {
+          xAxisIndex: i, yAxisIndex: i, areaStyle: { opacity: 0.15 },
+        })),
+        ...(withTrend ? shown.map((r, i) => trend(authors[r]!.name, per.get(r)!, colors.get(r)!, i)) : []),
+      ],
     };
   } else {
     chartEl.style.height = "100%";
     let list: any[];
+    const total = new Array(buckets.length).fill(0);
+    for (const arr of per.values()) arr.forEach((v, i) => (total[i] += v));
     if (layout === "total") {
-      const sum = new Array(buckets.length).fill(0);
-      for (const arr of per.values()) arr.forEach((v, i) => (sum[i] += v));
-      list = [line("total", sum, css.getPropertyValue("--s1").trim(), { areaStyle: { opacity: 0.15 } })];
+      list = [line("total", total, css.getPropertyValue("--s1").trim(), { areaStyle: { opacity: 0.15 } })];
     } else {
       // only the coloured (top 8) get their own series; the rest fold into "others"
       const stacked = layout === "stacked";
@@ -253,10 +341,16 @@ function renderChart() {
         list.push(line(`others (${rest.length})`, sum, other, extra));
       }
     }
+    const legend = list.length > 1;
+    if (withTrend) {
+      // a stack's (or the total's) trend is the trend of its top edge
+      if (layout === "overlaid") list.push(...list.map((s) => trend(s.name, s.data.map((p: number[]) => p[1]), s.color)));
+      else list.push(trend(layout === "total" ? "total" : "trend", total, ink));
+    }
     opt = {
       animation: false,
       tooltip,
-      legend: { show: list.length > 1, top: 8, textStyle: { color: ink }, type: "scroll" },
+      legend: { show: legend, top: 8, textStyle: { color: ink }, type: "scroll" },
       grid: { top: 48, left: 64, right: 24, bottom: 72 },
       xAxis: { type: "time", ...axisCommon, splitLine: { show: false } },
       yAxis: { type: "value", ...axisCommon },
@@ -276,18 +370,19 @@ const fmtDate = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 function renderBoard() {
   const m = metricEl.value as Metric;
   const [z0, z1] = zoom ?? [-Infinity, Infinity];
-  type S = { commits: number; add: number; del: number; v: number; first: number; last: number };
-  const stats = new Map<number, S>(roots().map((r) => [r, { commits: 0, add: 0, del: 0, v: 0, first: 0, last: 0 }]));
+  type S = { r: number; commits: number; add: number; del: number; first: number; last: number };
+  const stats = new Map<number, S>(roots().map((r) => [r, { r, commits: 0, add: 0, del: 0, first: 0, last: 0 }]));
   for (const c of commits) {
     if (c[0] < z0 || c[0] > z1) continue;
     const s = stats.get(parent[c[1]]!)!;
-    s.commits++; s.add += c[2]; s.del += c[3]; s.v += value(c, m);
+    s.commits++; s.add += c[2]; s.del += c[3];
     s.first ||= c[0]; s.last = c[0];
   }
   const colors = colorOf(rank(m));
-  const order = [...stats].sort((a, b) => b[1].v - a[1].v || b[1].commits - a[1].commits);
+  const order = sortRows([...stats.values()], boardSort, boardKey(), boardEl.tHead!);
   rowsEl.replaceChildren();
-  order.forEach(([r, s], i) => {
+  order.forEach((s, i) => {
+    const r = s.r;
     const tr = document.createElement("tr");
     tr.className = "root" + (hidden.has(r) ? " off" : "");
     tr.draggable = true;
@@ -296,6 +391,7 @@ function renderBoard() {
     tr.innerHTML = `<td>${i + 1}</td><td><span class="sw"></span><span class="nm"></span></td>
       <td>${s.commits.toLocaleString()}</td><td class="add">+${s.add.toLocaleString()}</td>
       <td class="add">−${s.del.toLocaleString()}</td>
+      <td>${(s.add - s.del).toLocaleString()}</td><td>${(s.add + s.del).toLocaleString()}</td>
       <td>${s.first ? fmtDate(s.first) : "–"}</td><td>${s.last ? fmtDate(s.last) : "–"}</td>`;
     (tr.querySelector(".sw") as HTMLElement).style.background = colors.get(r) ?? "transparent";
     tr.querySelector(".nm")!.textContent = authors[r]!.name;
@@ -321,7 +417,7 @@ function renderBoard() {
     if (expanded.has(r)) for (const a of [r, ...al]) {
       const sub = document.createElement("tr");
       sub.className = "alias";
-      sub.innerHTML = `<td></td><td colspan="6"></td>`;
+      sub.innerHTML = `<td></td><td colspan="8"></td>`;
       sub.children[1]!.textContent = `${authors[a]!.name} <${authors[a]!.email}>`;
       if (a !== r) {
         const x = document.createElement("button");
@@ -342,13 +438,53 @@ function merge(src: number, dst: number) {
   render();
 }
 
+// --- commit explorer for a clicked bucket ---
+let side: { from: number; to: number; root: number | null } | null = null;
+const sideTable = sideEl.querySelector("table")!;
+function renderSide() {
+  sideEl.hidden = !side;
+  if (!side) return;
+  const { from, to, root } = side;
+  const rows = commits
+    .filter((c) => c[0] >= from && c[0] < to && (root === null ? !hidden.has(parent[c[1]]!) : parent[c[1]] === root))
+    .map(([t, a, add, del, ri]) => ({ t, a, add, del, ri }));
+  sortRows(rows, sideSort, sideKey(), sideTable.tHead!);
+  const span = from === -Infinity ? `up to ${fmtDate(to - 1)}` :
+    fmtDate(from) === fmtDate(to - 1) ? fmtDate(from) : `${fmtDate(from)} → ${fmtDate(to - 1)}`;
+  sideEl.querySelector("h2")!.innerHTML = `<span></span> <small></small>`;
+  sideEl.querySelector("h2 span")!.textContent = root === null ? "all shown" : authors[root]!.name;
+  sideEl.querySelector("h2 small")!.textContent = `${span} · ${rows.length.toLocaleString()} commits`;
+  const colors = colorOf(rank(metricEl.value as Metric));
+  // ponytail: render cap keeps huge cumulative ranges snappy; paginate if anyone needs row 501
+  sideTable.tBodies[0]!.replaceChildren(...rows.slice(0, 500).map((c) => {
+    const tr = document.createElement("tr");
+    const [hash, subject] = raw[c.ri]!.info;
+    tr.innerHTML = `<td>${fmtDate(c.t)}</td><td><span class="sw"></span><span class="nm"></span></td><td><code></code><span></span></td>
+      <td class="add">+${c.add.toLocaleString()}</td><td class="add">−${c.del.toLocaleString()}</td>
+      <td>${(c.add - c.del).toLocaleString()}</td><td>${(c.add + c.del).toLocaleString()}</td>`;
+    const r = parent[c.a]!;
+    (tr.querySelector(".sw") as HTMLElement).style.background = colors.get(r) ?? "transparent";
+    tr.querySelector(".nm")!.textContent = authors[r]!.name;
+    tr.querySelector("code")!.textContent = hash;
+    tr.querySelector("td:nth-child(3) span")!.textContent = subject;
+    return tr;
+  }));
+}
+$("sideClose").onclick = () => { side = null; renderSide(); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && side) { side = null; renderSide(); } });
+
 function render() {
   renderChart();
   renderBoard();
+  renderSide();
   save();
 }
 
-for (const el of [metricEl, bucketEl, cumulativeEl, layoutEl]) el.onchange = render;
+const boardEl = rowsEl.closest("table")!;
+bindSort(boardEl.tHead!, boardSort, boardKey, renderBoard);
+bindSort(sideTable.tHead!, sideSort, sideKey, renderSide);
+metricEl.onchange = () => { boardSort.k = sideSort.k = ""; boardSort.asc = sideSort.asc = false; render(); };
+for (const el of [bucketEl, cumulativeEl, layoutEl, modeEl, trendEl]) el.onchange = render;
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 buildExtFilter();
 applyFilter();

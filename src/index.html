@@ -79,6 +79,21 @@ details .pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; 
 .pop .list { max-height: 320px; overflow: auto; }
 .pop .list label { color: var(--text-primary); padding: 2px 0; }
 .pop .n { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+th[data-k] { cursor: pointer; user-select: none; }
+th[data-k]:hover, th.on { color: var(--text-primary); }
+th.on::after { content: " ▼"; font-size: 10px; }
+th.on.asc::after { content: " ▲"; }
+#side { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); z-index: 20; display: flex; flex-direction: column;
+  background: var(--surface-1); border-left: 1px solid var(--border); box-shadow: -6px 0 24px #0003; }
+#side[hidden] { display: none; }
+#side > div:first-child { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+#side h2 { font-size: 14px; margin: 0; flex: 1; }
+#side h2 small { color: var(--text-muted); font-weight: 400; }
+#side .list { flex: 1; overflow: auto; }
+#side th:nth-child(2), #side td:nth-child(2) { width: auto; }
+#side th:nth-child(3), #side td:nth-child(3) { text-align: left; width: 100%; white-space: normal; }
+#side td { vertical-align: top; }
+#side code { color: var(--text-muted); font-size: 12px; margin-right: 6px; }
 @media (max-width: 760px) {
   th:nth-child(n+6), td:nth-child(n+6) { display: none; }
 }
@@ -103,7 +118,15 @@ details .pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; 
       <option value="month">month</option>
     </select>
   </label>
+  <label>View
+    <select id="mode">
+      <option value="bar">buckets</option>
+      <option value="line">line</option>
+      <option value="smooth">smooth line</option>
+    </select>
+  </label>
   <label><input type="checkbox" id="cumulative"> cumulative</label>
+  <label><input type="checkbox" id="trend" checked> trend</label>
   <details id="exts">
     <summary>Files: all</summary>
     <div class="pop">
@@ -127,12 +150,23 @@ details .pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; 
   <section id="chartWrap"><div id="chart"></div></section>
   <section id="board">
     <table>
-      <thead><tr><th>#</th><th>committer</th><th>commits</th><th>+</th><th>−</th><th>first</th><th>last</th></tr></thead>
+      <thead><tr><th>#</th><th>committer</th><th data-k="commits">commits</th><th data-k="add">+</th><th data-k="del">−</th>
+        <th data-k="net">net</th><th data-k="churn">churn</th><th data-k="first">first</th><th data-k="last">last</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <p class="hint">Click a row to hide/show it. Drag a row onto another to merge them (saved per repo). Numbers follow the zoomed range and file filter.</p>
+    <p class="hint">Click a row to hide/show it. Drag a row onto another to merge them (saved per repo). Click a column header to sort. Click the chart to list that bucket's commits. Numbers follow the zoomed range and file filter.</p>
   </section>
 </main>
+<aside id="side" hidden>
+  <div><h2></h2><button class="x" id="sideClose" title="Close">×</button></div>
+  <div class="list">
+    <table>
+      <thead><tr><th data-k="t">date</th><th>author</th><th>commit</th><th data-k="add">+</th><th data-k="del">−</th>
+        <th data-k="net">net</th><th data-k="churn">churn</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</aside>
 <script type="module" src="./app.ts"></script>
 </body>
 </html>
