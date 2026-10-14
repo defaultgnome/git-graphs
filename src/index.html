@@ -67,6 +67,7 @@ tr.alias td { color: var(--text-muted); font-size: 12px; padding-top: 0; }
 .x { font: inherit; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; }
 .x:hover { color: var(--text-primary); }
 .add { color: var(--text-secondary); }
+.tip { color: var(--text-muted); font-size: 12px; cursor: help; text-decoration: underline dotted; }
 .hint { color: var(--text-muted); font-size: 12px; padding: 8px; }
 details { position: relative; }
 summary { cursor: pointer; color: var(--text-secondary); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; list-style: none; }
@@ -105,11 +106,17 @@ th.on.asc::after { content: " ▲"; }
   <label>Metric
     <select id="metric">
       <option value="commits">commits</option>
+      <option value="tickets">tickets worked on</option>
       <option value="churn">LOC churn (+ / −)</option>
       <option value="added">LOC added</option>
       <option value="deleted">LOC deleted</option>
       <option value="net">LOC net (+ − −)</option>
     </select>
+    <small id="ticketHint" class="tip" hidden title="A ticket is any NX-<number> found in a commit subject (case-insensitive).
+Each ticket counts once per bucket per author, however many commits mention it.
+Commits without a ticket key add nothing.
+Cumulative: distinct tickets touched so far.
+Total layout counts a ticket shared by several people once; overlaid/stacked count it once per person.">what tickets mean here ⓘ</small>
   </label>
   <label>Bucket
     <select id="bucket">
@@ -151,7 +158,8 @@ th.on.asc::after { content: " ▲"; }
   <section id="chartWrap"><div id="chart"></div></section>
   <section id="board">
     <table>
-      <thead><tr><th>#</th><th>committer</th><th data-k="commits">commits</th><th data-k="add">+</th><th data-k="del">−</th>
+      <thead><tr><th>#</th><th>committer</th><th data-k="commits">commits</th>
+        <th data-k="tickets" title="Distinct NX-<number> keys in this person's commit subjects">tickets</th><th data-k="add">+</th><th data-k="del">−</th>
         <th data-k="net">net</th><th data-k="churn">churn</th><th data-k="first">first</th><th data-k="last">last</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>

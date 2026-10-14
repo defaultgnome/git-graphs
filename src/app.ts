@@ -1,7 +1,7 @@
 import * as echarts from "echarts";
 import type { Data } from "./git";
 
-type Metric = "commits" | "churn" | "added" | "deleted" | "net";
+type Metric = "commits" | "tickets" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
 type View = Partial<{
   metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean; skipFirst: boolean;
@@ -11,8 +11,13 @@ type View = Partial<{
 const [data, saved] = (await Promise.all(
   ["/api/data", "/api/state"].map((u) => fetch(u).then((r) => r.json())),
 )) as [Data & { repo: string }, { merges: Record<string, string>; view: View }];
+// ponytail: NX is this team's Jira key; widen to [A-Z]+-\d+ if other projects show up (beware UTF-8, SHA-256)
+const TICKET = /\bNX-\d+\b/g;
 const raw = data.commits
-  .map(([t, a, ...files], i) => ({ t: t! * 1000, a: a!, files, info: data.info[i] ?? ["", ""] }))
+  .map(([t, a, ...files], i) => {
+    const info = data.info[i] ?? ["", ""];
+    return { t: t! * 1000, a: a!, files, info, tix: [...new Set(info[1].toUpperCase().match(TICKET))] };
+  })
   .sort((x, y) => x.t - y.t);
 const authors = data.authors;
 
@@ -133,8 +138,10 @@ const DAY = 864e5;
 bucketEl.value = tMax - tMin < 90 * DAY ? "day" : tMax - tMin < 730 * DAY ? "week" : "month";
 restore(bucketEl, view.bucket);
 
+const tix = (c: readonly number[]) => raw[c[4]!]!.tix;
+// tickets aren't additive (same ticket across commits counts once), so they're counted via sets, not value()
 const value = (c: readonly number[], m: Metric) =>
-  m === "commits" ? 1 : m === "added" ? c[2]! : m === "deleted" ? c[3]! : m === "net" ? c[2]! - c[3]! : c[2]! + c[3]!;
+  m === "tickets" ? 0 : m === "commits" ? 1 : m === "added" ? c[2]! : m === "deleted" ? c[3]! : m === "net" ? c[2]! - c[3]! : c[2]! + c[3]!;
 
 function floorTo(ms: number, b: Bucket) {
   const d = new Date(ms);
@@ -156,11 +163,11 @@ const aliases = (r: number) => parent.flatMap((p, i) => (p === r && i !== r ? [i
 
 // header-click sorting; an empty key follows the metric picked at the top
 type Sort = { k: string; asc: boolean };
-const METRIC_KEY: Record<Metric, string> = { commits: "commits", added: "add", deleted: "del", net: "net", churn: "churn" };
+const METRIC_KEY: Record<Metric, string> = { commits: "commits", tickets: "tickets", added: "add", deleted: "del", net: "net", churn: "churn" };
 const boardSort: Sort = { k: "", asc: false };
 const sideSort: Sort = { k: "", asc: false };
 const boardKey = () => boardSort.k || METRIC_KEY[metricEl.value as Metric];
-const sideKey = () => sideSort.k || (metricEl.value === "commits" ? "churn" : METRIC_KEY[metricEl.value as Metric]);
+const sideKey = () => sideSort.k || (["commits", "tickets"].includes(metricEl.value) ? "churn" : METRIC_KEY[metricEl.value as Metric]);
 type Row = { add: number; del: number } & Record<string, number>;
 const col = (x: Row, k: string) => (k === "net" ? x.add - x.del : k === "churn" ? x.add + x.del : x[k]!);
 function sortRows<T extends Row>(items: T[], s: Sort, k: string, thead: HTMLElement) {
@@ -183,7 +190,13 @@ function bindSort(thead: HTMLElement, s: Sort, current: () => string, rerender: 
 // all-time rank by |metric|, ignoring zoom and hidden rows, so hiding/zooming never repaints anyone
 function rank(m: Metric) {
   const tot = new Map<number, number>();
-  for (const c of commits) tot.set(parent[c[1]]!, (tot.get(parent[c[1]]!) ?? 0) + value(c, m));
+  const seen = new Map<number, Set<string>>();
+  for (const c of commits) {
+    const r = parent[c[1]]!;
+    tot.set(r, (tot.get(r) ?? 0) + value(c, m));
+    if (m === "tickets") for (const k of tix(c)) (seen.get(r) ?? seen.set(r, new Set()).get(r)!).add(k);
+  }
+  for (const [r, s] of seen) tot.set(r, s.size);
   return [...tot].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([r]) => r);
 }
 
@@ -198,15 +211,35 @@ function series(m: Metric, b: Bucket, cumulative: boolean) {
   for (let t = floorTo(tMin, b); t <= tMax; t = nextBucket(t, b)) buckets.push(t);
   const idx = new Map(buckets.map((t, i) => [t, i]));
   const per = new Map<number, number[]>();
+  // tickets: a unique set per bucket per author; key -1 is everyone shown, so a shared ticket counts once in the total
+  const sets = new Map<number, Set<string>[]>();
+  const addTix = (r: number, i: number, keys: string[]) => {
+    let s = sets.get(r);
+    if (!s) sets.set(r, (s = buckets.map(() => new Set())));
+    for (const k of keys) s[i]!.add(k);
+  };
   for (const c of commits) {
     const r = parent[c[1]]!;
     if (hidden.has(r)) continue;
     let arr = per.get(r);
     if (!arr) per.set(r, (arr = new Array(buckets.length).fill(0)));
-    arr[idx.get(floorTo(c[0], b))!] += value(c, m);
+    const i = idx.get(floorTo(c[0], b))!;
+    if (m === "tickets") { addTix(r, i, tix(c)); addTix(-1, i, tix(c)); }
+    else arr[i] += value(c, m);
   }
-  if (cumulative) for (const arr of per.values()) for (let i = 1; i < arr.length; i++) arr[i] += arr[i - 1]!;
-  return { buckets, per };
+  let total = new Array(buckets.length).fill(0);
+  if (m === "tickets") {
+    // cumulative = distinct tickets touched so far, not a running sum
+    const count = (s: Set<string>[]) => {
+      const all = new Set<string>();
+      return s.map((x) => (cumulative ? (x.forEach((k) => all.add(k)), all.size) : x.size));
+    };
+    for (const [r, s] of sets) r === -1 ? (total = count(s)) : per.set(r, count(s));
+  } else {
+    if (cumulative) for (const arr of per.values()) for (let i = 1; i < arr.length; i++) arr[i] += arr[i - 1]!;
+    for (const arr of per.values()) arr.forEach((v, i) => (total[i] += v));
+  }
+  return { buckets, per, total };
 }
 
 // least-squares line over the buckets inside the zoom window
@@ -253,7 +286,7 @@ new ResizeObserver(() => chart.resize()).observe(chartEl.parentElement!);
 
 function renderChart() {
   const m = metricEl.value as Metric, b = bucketEl.value as Bucket, layout = layoutEl.value;
-  const { buckets, per } = series(m, b, cumulativeEl.checked);
+  const { buckets, per, total } = series(m, b, cumulativeEl.checked);
   const order = rank(m);
   const colors = colorOf(order);
   const ranked = order.filter((r) => per.has(r));
@@ -328,8 +361,6 @@ function renderChart() {
   } else {
     chartEl.style.height = "100%";
     let list: any[];
-    const total = new Array(buckets.length).fill(0);
-    for (const arr of per.values()) arr.forEach((v, i) => (total[i] += v));
     if (layout === "total") {
       list = [line("total", total, css.getPropertyValue("--s1").trim(), { areaStyle: { opacity: 0.15 } })];
     } else {
@@ -346,7 +377,7 @@ function renderChart() {
     }
     const legend = list.length > 1;
     if (withTrend) {
-      // a stack's (or the total's) trend is the trend of its top edge
+      // a stack's (or the total's) trend is the trend of its top edge; for tickets, of the distinct union
       if (layout === "overlaid") list.push(...list.map((s) => trend(s.name, s.data.map((p: number[]) => p[1]), s.color)));
       else list.push(trend(layout === "total" ? "total" : "trend", total, ink));
     }
@@ -373,14 +404,18 @@ const fmtDate = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 function renderBoard() {
   const m = metricEl.value as Metric;
   const [z0, z1] = zoom ?? [-Infinity, Infinity];
-  type S = { r: number; commits: number; add: number; del: number; first: number; last: number };
-  const stats = new Map<number, S>(roots().map((r) => [r, { r, commits: 0, add: 0, del: 0, first: 0, last: 0 }]));
+  type S = { r: number; commits: number; tickets: number; add: number; del: number; first: number; last: number };
+  const stats = new Map<number, S>(roots().map((r) => [r, { r, commits: 0, tickets: 0, add: 0, del: 0, first: 0, last: 0 }]));
+  const seen = new Map<number, Set<string>>();
   for (const c of commits) {
     if (c[0] < z0 || c[0] > z1) continue;
-    const s = stats.get(parent[c[1]]!)!;
+    const r = parent[c[1]]!;
+    const s = stats.get(r)!;
     s.commits++; s.add += c[2]; s.del += c[3];
     s.first ||= c[0]; s.last = c[0];
+    for (const k of tix(c)) (seen.get(r) ?? seen.set(r, new Set()).get(r)!).add(k);
   }
+  for (const [r, set] of seen) stats.get(r)!.tickets = set.size;
   const colors = colorOf(rank(m));
   const order = sortRows([...stats.values()], boardSort, boardKey(), boardEl.tHead!);
   rowsEl.replaceChildren();
@@ -392,7 +427,7 @@ function renderBoard() {
     tr.title = `${authors[r]!.email} — click to hide/show, drag onto another row to merge`;
     const al = aliases(r);
     tr.innerHTML = `<td>${i + 1}</td><td><span class="sw"></span><span class="nm"></span></td>
-      <td>${s.commits.toLocaleString()}</td><td class="add">+${s.add.toLocaleString()}</td>
+      <td>${s.commits.toLocaleString()}</td><td>${s.tickets.toLocaleString()}</td><td class="add">+${s.add.toLocaleString()}</td>
       <td class="add">−${s.del.toLocaleString()}</td>
       <td>${(s.add - s.del).toLocaleString()}</td><td>${(s.add + s.del).toLocaleString()}</td>
       <td>${s.first ? fmtDate(s.first) : "–"}</td><td>${s.last ? fmtDate(s.last) : "–"}</td>`;
@@ -420,7 +455,7 @@ function renderBoard() {
     if (expanded.has(r)) for (const a of [r, ...al]) {
       const sub = document.createElement("tr");
       sub.className = "alias";
-      sub.innerHTML = `<td></td><td colspan="8"></td>`;
+      sub.innerHTML = `<td></td><td colspan="9"></td>`;
       sub.children[1]!.textContent = `${authors[a]!.name} <${authors[a]!.email}>`;
       if (a !== r) {
         const x = document.createElement("button");
@@ -486,7 +521,9 @@ function render() {
 const boardEl = rowsEl.closest("table")!;
 bindSort(boardEl.tHead!, boardSort, boardKey, renderBoard);
 bindSort(sideTable.tHead!, sideSort, sideKey, renderSide);
-metricEl.onchange = () => { boardSort.k = sideSort.k = ""; boardSort.asc = sideSort.asc = false; render(); };
+const syncHint = () => ($("ticketHint").hidden = metricEl.value !== "tickets");
+syncHint();
+metricEl.onchange = () => { syncHint(); boardSort.k = sideSort.k = ""; boardSort.asc = sideSort.asc = false; render(); };
 for (const el of [bucketEl, cumulativeEl, layoutEl, modeEl, trendEl]) el.onchange = render;
 skipFirstEl.onchange = () => { applyFilter(); render(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
