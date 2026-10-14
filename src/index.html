@@ -4,178 +4,394 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ggrph</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233987e5' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='5' cy='6' r='3'/%3E%3Cpath d='M5 9v6'/%3E%3Ccircle cx='5' cy='18' r='3'/%3E%3Cpath d='M12 3v18'/%3E%3Ccircle cx='19' cy='6' r='3'/%3E%3Cpath d='M16 15.7A9 9 0 0 0 19 9'/%3E%3C/svg%3E">
 <style>
 :root {
   color-scheme: light;
-  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e2e1dc;
-  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
-  --accent: #2a78d6; --other: #a3a29c;
+  --surface-0: #f5f5f3; --surface-1: #ffffff; --surface-2: #f0efec; --border: #e7e6e1; --border-strong: #d4d3cd;
+  --text-primary: #111112; --text-secondary: #55544f; --text-muted: #8d8c86;
+  --accent: #2a78d6; --accent-soft: rgba(42,120,214,.12); --on-accent: #fff;
+  --pos: #16915c; --neg: #d6423a; --other: #a3a29c;
+  --shadow: 0 1px 2px rgba(20,20,20,.04), 0 4px 16px rgba(20,20,20,.05);
+  --shadow-pop: 0 12px 40px rgba(20,20,20,.16), 0 2px 6px rgba(20,20,20,.06);
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
   --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
-    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8a8984;
-    --accent: #3987e5; --other: #6b6a65;
+    --surface-0: #0c0c0e; --surface-1: #141417; --surface-2: #1c1c20; --border: #25252a; --border-strong: #35353c;
+    --text-primary: #f4f4f5; --text-secondary: #b6b6bd; --text-muted: #7c7c85;
+    --accent: #4c94ec; --accent-soft: rgba(76,148,236,.16); --on-accent: #fff;
+    --pos: #3ccf8e; --neg: #f2665f; --other: #5f5f68;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.25);
+    --shadow-pop: 0 16px 48px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
     --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c;
-  --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8a8984;
-  --accent: #3987e5; --other: #6b6a65;
+  --surface-0: #0c0c0e; --surface-1: #141417; --surface-2: #1c1c20; --border: #25252a; --border-strong: #35353c;
+  --text-primary: #f4f4f5; --text-secondary: #b6b6bd; --text-muted: #7c7c85;
+  --accent: #4c94ec; --accent-soft: rgba(76,148,236,.16); --on-accent: #fff;
+  --pos: #3ccf8e; --neg: #f2665f; --other: #5f5f68;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.25);
+  --shadow-pop: 0 16px 48px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
 }
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
   margin: 0; background: var(--surface-0); color: var(--text-primary);
-  font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
-  height: 100vh; display: flex; flex-direction: column;
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column; overflow: hidden;
 }
-header {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
-  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface-1);
-}
-h1 { font-size: 16px; margin: 0 8px 0 0; }
-h1 small { color: var(--text-muted); font-weight: 400; }
-label { color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
-select { font: inherit; padding: 4px 6px; }
-main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-/* native drag handle at the bottom-right corner resizes the chart/board split */
-#chartWrap { flex: none; height: 55vh; min-height: 160px; resize: vertical; overflow: auto; border-bottom: 1px solid var(--border); }
-#board { flex: 1; min-height: 120px; overflow: auto; background: var(--surface-1); }
-#chart { width: 100%; height: 100%; }
-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-th, td { padding: 6px 8px; text-align: right; white-space: nowrap; }
-th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary);
-     font-weight: 500; border-bottom: 1px solid var(--border); z-index: 1; }
-th:nth-child(2), td:nth-child(2) { text-align: left; width: 100%; }
-.nm { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-tbody tr.root { cursor: grab; border-top: 1px solid var(--border); }
-tbody tr.root:hover { background: var(--surface-0); }
-tr.off { opacity: .4; }
-tr.drop { outline: 2px dashed var(--accent); outline-offset: -2px; }
-tr.alias td { color: var(--text-muted); font-size: 12px; padding-top: 0; }
-.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
-.badge { font: inherit; font-size: 11px; margin-left: 6px; padding: 0 6px; border-radius: 8px;
-         border: 1px solid var(--border); background: none; color: var(--text-secondary); cursor: pointer; }
-.x { font: inherit; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; }
-.x:hover { color: var(--text-primary); }
-.add { color: var(--text-secondary); }
-.tip { color: var(--text-muted); font-size: 12px; cursor: help; text-decoration: underline dotted; }
-.hint { color: var(--text-muted); font-size: 12px; padding: 8px; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2;
+     stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+.i.sm { width: 13px; height: 13px; vertical-align: -2px; }
+.num, td, .kpi b { font-variant-numeric: tabular-nums; }
+
+/* --- top bar --- */
+.top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logo { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: #fff;
+  background: linear-gradient(135deg, var(--s1), var(--s7)); box-shadow: 0 4px 14px var(--accent-soft); }
+.logo .i { width: 18px; height: 18px; stroke-width: 2.4; }
+h1 { font-size: 16px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
+.repo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 10px 3px 8px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); color: var(--text-secondary); }
+.repo b { color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo small { color: var(--text-muted); white-space: nowrap; }
+.spacer { flex: 1; }
+.icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 8px;
+  border: 1px solid transparent; background: none; color: var(--text-secondary); transition: background .15s, color .15s, border-color .15s; }
+.icon-btn:hover { background: var(--surface-2); color: var(--text-primary); border-color: var(--border); }
+.icon-btn:active { transform: scale(.94); }
+
+/* --- toolbar --- */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 0 16px 12px; }
+.field { display: flex; align-items: center; gap: 8px; }
+.lbl { color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.sep { width: 1px; height: 22px; background: var(--border); }
+.select { position: relative; display: inline-flex; align-items: center; }
+.select select { appearance: none; height: 32px; padding: 0 30px 0 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-1); font-weight: 500; box-shadow: var(--shadow);
+  transition: border-color .15s, background .15s; }
+.select select:hover { border-color: var(--border-strong); }
+.select .chev { position: absolute; right: 9px; pointer-events: none; color: var(--text-muted); }
+.segbar { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.segbar button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: none; border-radius: 7px;
+  background: none; color: var(--text-secondary); font-weight: 500; white-space: nowrap; transition: background .15s, color .15s, box-shadow .15s; }
+.segbar button:hover { color: var(--text-primary); background: rgba(127,127,127,.1); }
+.segbar button[aria-pressed="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: 0 1px 3px rgba(0,0,0,.15), 0 0 0 1px var(--border); }
+.segbar button[aria-pressed="true"] .i { color: var(--accent); }
+.toggle { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px 0 8px; border-radius: 8px;
+  color: var(--text-secondary); cursor: pointer; user-select: none; transition: background .15s, color .15s; }
+.toggle:hover { background: var(--surface-2); color: var(--text-primary); }
+.toggle input { appearance: none; margin: 0; position: relative; width: 28px; height: 16px; border-radius: 999px; cursor: pointer;
+  background: var(--border-strong); transition: background .2s; flex: none; }
+.toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: translate .2s cubic-bezier(.3,1.4,.5,1); }
+.toggle input:checked { background: var(--accent); }
+.toggle input:checked::after { translate: 12px 0; }
+.toggle:has(input:checked) { color: var(--text-primary); }
+.tip { display: inline-grid; color: var(--text-muted); cursor: help; }
+.tip:hover { color: var(--accent); }
+
+/* --- file filter popover --- */
 details { position: relative; }
-summary { cursor: pointer; color: var(--text-secondary); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; list-style: none; }
-details[open] summary { color: var(--text-primary); }
-details .pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; width: 260px; padding: 8px;
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px #0003; }
-.pop .btns { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-.pop button { font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--surface-0); color: var(--text-primary); cursor: pointer; }
-.pop .list { max-height: 320px; overflow: auto; }
-.pop .list label { color: var(--text-primary); padding: 2px 0; }
+summary { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border-radius: 8px; cursor: pointer;
+  list-style: none; border: 1px solid var(--border); background: var(--surface-1); box-shadow: var(--shadow);
+  color: var(--text-secondary); font-weight: 500; transition: border-color .15s, color .15s; }
+summary::-webkit-details-marker { display: none; }
+summary:hover, details[open] summary { border-color: var(--border-strong); color: var(--text-primary); }
+summary .chev { color: var(--text-muted); transition: rotate .2s; }
+details[open] summary .chev { rotate: 180deg; }
+details .pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 280px; padding: 10px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-pop);
+  transition: opacity .15s, translate .15s; }
+@starting-style { details[open] .pop { opacity: 0; translate: 0 -4px; } }
+.pop input[type="search"] { width: 100%; height: 30px; padding: 0 10px; margin-bottom: 8px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2); outline: none; }
+.pop input[type="search"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pop .btns { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.pop .btns button { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text-secondary); transition: all .15s; }
+.pop .btns button:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.pop .list { max-height: 320px; overflow: auto; margin: 0 -4px; }
+.pop .list label { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.pop .list label:hover { background: var(--surface-2); }
+.pop .list input { accent-color: var(--accent); margin: 0; }
 .pop .n { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
-th[data-k] { cursor: pointer; user-select: none; }
-th[data-k]:hover, th.on { color: var(--text-primary); }
-th.on::after { content: " ▼"; font-size: 10px; }
-th.on.asc::after { content: " ▲"; }
-#side { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); z-index: 20; display: flex; flex-direction: column;
-  background: var(--surface-1); border-left: 1px solid var(--border); box-shadow: -6px 0 24px #0003; }
+
+/* --- kpis --- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; padding: 0 16px 12px; }
+.kpi { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px;
+  background: var(--surface-1); border: 1px solid var(--border); box-shadow: var(--shadow); min-width: 0; }
+.kpi .ic { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; flex: none;
+  background: var(--accent-soft); color: var(--accent); }
+.kpi.pos .ic { color: var(--pos); background: color-mix(in srgb, var(--pos) 14%, transparent); }
+.kpi.neg .ic { color: var(--neg); background: color-mix(in srgb, var(--neg) 14%, transparent); }
+.kpi div { min-width: 0; }
+.kpi span { display: block; color: var(--text-muted); font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.kpi b { display: block; font-size: 15px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* --- cards --- */
+main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 16px 16px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+#chartWrap { flex: none; height: 52vh; min-height: 160px; overflow: auto; }
+#chart { width: 100%; height: 100%; }
+#splitter { flex: none; height: 14px; display: grid; place-items: center; cursor: row-resize; touch-action: none; }
+#splitter::after { content: ""; width: 44px; height: 4px; border-radius: 999px; background: var(--border-strong); transition: background .15s, width .15s; }
+#splitter:hover::after, #splitter.drag::after { background: var(--accent); width: 72px; }
+#board { flex: 1; min-height: 120px; overflow: auto; }
+
+/* --- tables --- */
+table { border-collapse: separate; border-spacing: 0; width: 100%; }
+th, td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter: blur(8px); color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; border-bottom: 1px solid var(--border); }
+th:first-child { padding-left: 16px; }
+th:nth-child(2), td:nth-child(2) { text-align: left; width: 100%; }
+th[data-k] { cursor: pointer; user-select: none; transition: color .15s; }
+th[data-k]:hover { color: var(--text-primary); }
+th.on { color: var(--accent); }
+th.on::after { content: ""; display: inline-block; margin-left: 4px; border: 4px solid transparent; border-top-color: currentColor; vertical-align: -2px; }
+th.on.asc::after { border-top-color: transparent; border-bottom-color: currentColor; vertical-align: 2px; }
+td { border-bottom: 1px solid var(--border); }
+tbody tr:last-child td { border-bottom: none; }
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+.dim { color: var(--text-muted); }
+
+tbody tr.root { cursor: pointer; transition: background .12s, opacity .2s; }
+tbody tr.root:hover { background: var(--surface-2); }
+tr.root td.rk { position: relative; padding-left: 16px; color: var(--text-muted); }
+tr.root .grip { position: absolute; left: 0; top: 50%; translate: 0 -50%; color: var(--text-muted); opacity: 0; cursor: grab; transition: opacity .15s; }
+tr.root:hover .grip { opacity: 1; }
+tr.off { opacity: .38; }
+tr.off:hover { opacity: .7; }
+tr.dragging { opacity: .4; }
+tr.drop td { background: var(--accent-soft); }
+tr.drop td:first-child { box-shadow: inset 3px 0 var(--accent); }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.av { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%;
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-shadow: 0 1px 1px rgba(0,0,0,.25);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.av.sm { width: 20px; height: 20px; font-size: 9px; }
+.who-t { flex: 1; min-width: 0; }
+.who-n { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.nm { overflow: hidden; text-overflow: ellipsis; font-weight: 550; max-width: 340px; }
+.share { display: block; height: 3px; margin-top: 4px; max-width: 240px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.share b { display: block; height: 100%; border-radius: inherit; transition: width .3s ease; }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary); transition: all .15s; }
+.badge:hover, .badge[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.eye { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 6px;
+  background: none; color: var(--text-muted); opacity: 0; transition: opacity .15s, background .15s, color .15s; }
+tr.root:hover .eye, tr.off .eye { opacity: 1; }
+.eye:hover { background: var(--surface-1); color: var(--text-primary); }
+tr.alias td { padding-top: 4px; padding-bottom: 4px; background: var(--surface-2); color: var(--text-secondary); font-size: 12px; }
+tr.alias td:nth-child(2) { padding-left: 48px; }
+tr.alias .i { color: var(--text-muted); margin-right: 6px; }
+tr.alias em { font-style: normal; color: var(--text-muted); margin-left: 4px; }
+.x { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; margin-left: 6px; border: none; border-radius: 6px;
+  background: none; color: var(--text-muted); vertical-align: middle; transition: background .15s, color .15s; }
+.x:hover { color: var(--neg); background: color-mix(in srgb, var(--neg) 14%, transparent); }
+.hint { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 12px 16px; color: var(--text-muted); font-size: 12px; border-top: 1px solid var(--border); }
+.hint span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* --- commit explorer --- */
+#side { position: fixed; top: 10px; right: 10px; bottom: 10px; width: min(720px, calc(100vw - 20px)); z-index: 40;
+  display: flex; flex-direction: column; overflow: hidden; border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-1) 94%, transparent); backdrop-filter: blur(16px);
+  border: 1px solid var(--border); box-shadow: var(--shadow-pop); transition: translate .25s cubic-bezier(.2,.9,.3,1), opacity .2s; }
+@starting-style { #side { translate: 40px 0; opacity: 0; } }
 #side[hidden] { display: none; }
-#side > div:first-child { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-#side h2 { font-size: 14px; margin: 0; flex: 1; }
-#side h2 small { color: var(--text-muted); font-weight: 400; }
+.side-h { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 18px; border-bottom: 1px solid var(--border); }
+.side-h > div { flex: 1; min-width: 0; }
+#side h2 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+#side .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-muted); font-size: 12px; }
 #side .list { flex: 1; overflow: auto; }
-#side th:nth-child(2), #side td:nth-child(2) { width: auto; }
+#side th { background: color-mix(in srgb, var(--surface-1) 92%, transparent); }
+#side th:first-child, #side td:first-child { padding-left: 18px; }
+#side th:nth-child(2), #side td:nth-child(2) { width: auto; text-align: left; }
 #side th:nth-child(3), #side td:nth-child(3) { text-align: left; width: 100%; white-space: normal; }
 #side td { vertical-align: top; }
-#side code { color: var(--text-muted); font-size: 12px; margin-right: 6px; }
+#side tbody tr { transition: background .12s; }
+#side tbody tr:hover { background: var(--surface-2); }
+#side .who { gap: 8px; }
+.hash { font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 6px; margin-right: 6px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary); transition: all .15s; }
+.hash:hover { color: var(--accent); border-color: var(--accent); }
+.tk { padding: 0 5px; white-space: nowrap; box-decoration-break: clone; border-radius: 4px; font-size: 12px; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent); }
+#toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; translate: -50% 12px; opacity: 0; pointer-events: none;
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; background: var(--text-primary);
+  color: var(--surface-1); font-weight: 500; box-shadow: var(--shadow-pop); transition: opacity .2s, translate .2s; }
+#toast.show { opacity: 1; translate: -50% 0; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--text-muted); }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+
 @media (max-width: 760px) {
   th:nth-child(n+6), td:nth-child(n+6) { display: none; }
+  .segbar button span { display: none; }
+  .sep { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>ggrph <small id="repo"></small></h1>
-  <label>Metric
-    <select id="metric">
-      <option value="commits">commits</option>
-      <option value="tickets">tickets worked on</option>
-      <option value="churn">LOC churn (+ / −)</option>
-      <option value="added">LOC added</option>
-      <option value="deleted">LOC deleted</option>
-      <option value="net">LOC net (+ − −)</option>
-    </select>
-    <small id="ticketHint" class="tip" hidden title="A ticket is any NX-<number> found in a commit subject (case-insensitive).
+<!-- icons: Lucide (ISC) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="5" cy="6" r="3"/><path d="M5 9v6"/><circle cx="5" cy="18" r="3"/><path d="M12 3v18"/><circle cx="19" cy="6" r="3"/><path d="M16 15.7A9 9 0 0 0 19 9"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+  <symbol id="i-line" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+  <symbol id="i-spline" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 16c.5-2 1.5-7 4-7 2 0 2 3 4 3 2.5 0 4.5-5 5-7"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect width="18" height="7" x="3" y="3" rx="1.5"/><rect width="18" height="7" x="3" y="14" rx="1.5"/></symbol>
+  <symbol id="i-overlay" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m7 13 4-5 4 3 5-6"/><path d="m7 17 4-3 4 2 5-4"/></symbol>
+  <symbol id="i-area" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 11.2a.5.5 0 0 1 .15-.35l2-2a.5.5 0 0 1 .7 0l3.3 3.3a.5.5 0 0 0 .7 0l4.3-4.3a.5.5 0 0 1 .85.35V16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-sigma" viewBox="0 0 24 24"><path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l4.5 6a2 2 0 0 1 0 2.4l-4.5 6a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.73 5.08a10.74 10.74 0 0 1 11.2 6.57 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-1.44 2.49"/><path d="M14.08 14.16a3 3 0 0 1-4.24-4.24"/><path d="M17.48 17.5a10.75 10.75 0 0 1-15.42-5.15 1 1 0 0 1 0-.7 10.75 10.75 0 0 1 4.45-5.14"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+  <symbol id="i-commit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M3 12h6"/><path d="M15 12h6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+  <symbol id="i-pointer" viewBox="0 0 24 24"><path d="M14 4.1 12 6"/><path d="m5.1 8-2.9-.8"/><path d="m6 12-1.9 2"/><path d="M7.2 2.2 8 5.1"/><path d="M9.04 9.68a.5.5 0 0 1 .64-.64l11 4a.5.5 0 0 1-.02.94l-4.2 1.3a1 1 0 0 0-.65.66l-1.3 4.2a.5.5 0 0 1-.94.02z"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+</svg>
+
+<header class="top">
+  <div class="brand">
+    <span class="logo"><svg class="i"><use href="#i-graph"/></svg></span>
+    <h1>ggrph</h1>
+    <span class="repo"><svg class="i sm"><use href="#i-folder"/></svg><b id="repo"></b><small id="repoCount"></small></span>
+  </div>
+  <div class="spacer"></div>
+  <button id="theme" class="icon-btn" title="Theme: system"><svg class="i"><use href="#i-monitor"/></svg></button>
+</header>
+<nav class="toolbar">
+  <div class="field">
+    <span class="lbl">Metric</span>
+    <span class="select">
+      <select id="metric">
+        <option value="commits">Commits</option>
+        <option value="tickets">Tickets worked on</option>
+        <option value="churn">LOC churn (+ / −)</option>
+        <option value="added">LOC added</option>
+        <option value="deleted">LOC deleted</option>
+        <option value="net">LOC net (+ − −)</option>
+      </select>
+      <svg class="i chev"><use href="#i-chev"/></svg>
+    </span>
+    <span id="ticketHint" class="tip" hidden title="A ticket is any NX-<number> found in a commit subject (case-insensitive).
 Each ticket counts once per bucket per author, however many commits mention it.
 Commits without a ticket key add nothing.
 Cumulative: distinct tickets touched so far.
-Total layout counts a ticket shared by several people once; overlaid/stacked count it once per person.">what tickets mean here ⓘ</small>
-  </label>
-  <label>Bucket
-    <select id="bucket">
-      <option value="day">day</option>
-      <option value="week">week</option>
-      <option value="month">month</option>
+Total layout counts a ticket shared by several people once; overlaid/stacked count it once per person."><svg class="i"><use href="#i-info"/></svg></span>
+  </div>
+  <div class="field">
+    <span class="lbl">Bucket</span>
+    <select id="bucket" class="seg" aria-label="Bucket">
+      <option value="day">Day</option>
+      <option value="week">Week</option>
+      <option value="month">Month</option>
     </select>
-  </label>
-  <label>View
-    <select id="mode">
-      <option value="bar">buckets</option>
-      <option value="line">line</option>
-      <option value="smooth">smooth line</option>
+  </div>
+  <div class="field">
+    <span class="lbl">View</span>
+    <select id="mode" class="seg" aria-label="View">
+      <option value="bar" data-icon="bars">Bars</option>
+      <option value="line" data-icon="line">Line</option>
+      <option value="smooth" data-icon="spline">Smooth</option>
     </select>
-  </label>
-  <label><input type="checkbox" id="cumulative"> cumulative</label>
-  <label><input type="checkbox" id="trend" checked> trend</label>
-  <label title="Drop the oldest commit, e.g. a huge initial import"><input type="checkbox" id="skipFirst"> ignore first commit</label>
+  </div>
+  <div class="field">
+    <span class="lbl">Layout</span>
+    <select id="layout" class="seg" aria-label="Layout">
+      <option value="split" data-icon="rows">Split</option>
+      <option value="overlaid" data-icon="overlay">Overlaid</option>
+      <option value="stacked" data-icon="area">Stacked</option>
+      <option value="total" data-icon="sigma">Total</option>
+    </select>
+  </div>
+  <div class="sep"></div>
+  <label class="toggle"><input type="checkbox" id="cumulative">Cumulative</label>
+  <label class="toggle"><input type="checkbox" id="trend" checked>Trend</label>
+  <label class="toggle" title="Drop the oldest commit, e.g. a huge initial import"><input type="checkbox" id="skipFirst">Ignore first commit</label>
   <details id="exts">
-    <summary>Files: all</summary>
+    <summary><svg class="i"><use href="#i-file"/></svg><span class="v">Files: all</span><svg class="i sm chev"><use href="#i-chev"/></svg></summary>
     <div class="pop">
+      <input type="search" placeholder="Filter extensions…" aria-label="Filter extensions">
       <div class="btns">
-        <button class="all">all</button><button class="none">none</button>
-        <button class="jsts">JS/TS only</button><button class="nojson">no .json</button>
+        <button class="all">All</button><button class="none">None</button>
+        <button class="jsts">JS/TS only</button><button class="nojson">No .json</button>
       </div>
       <div class="list"></div>
     </div>
   </details>
-  <label>Layout
-    <select id="layout">
-      <option value="split">split rows</option>
-      <option value="overlaid">overlaid</option>
-      <option value="stacked">stacked area</option>
-      <option value="total">total</option>
-    </select>
-  </label>
-</header>
+</nav>
+<section class="kpis" id="kpis"></section>
 <main>
-  <section id="chartWrap"><div id="chart"></div></section>
-  <section id="board">
+  <section id="chartWrap" class="card"><div id="chart"></div></section>
+  <div id="splitter" title="Drag to resize"></div>
+  <section id="board" class="card">
     <table>
-      <thead><tr><th>#</th><th>committer</th><th data-k="commits">commits</th>
-        <th data-k="tickets" title="Distinct NX-<number> keys in this person's commit subjects">tickets</th><th data-k="add">+</th><th data-k="del">−</th>
-        <th data-k="net">net</th><th data-k="churn">churn</th><th data-k="first">first</th><th data-k="last">last</th></tr></thead>
+      <thead><tr><th>#</th><th>Committer</th><th data-k="commits">Commits</th>
+        <th data-k="tickets" title="Distinct NX-<number> keys in this person's commit subjects">Tickets</th><th data-k="add">+</th><th data-k="del">−</th>
+        <th data-k="net">Net</th><th data-k="churn">Churn</th><th data-k="first">First</th><th data-k="last">Last</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <p class="hint">Click a row to hide/show it. Drag a row onto another to merge them (saved per repo). Click a column header to sort. Click the chart to list that bucket's commits. Numbers follow the zoomed range and file filter.</p>
+    <p class="hint">
+      <span><svg class="i sm"><use href="#i-eye"/></svg>Click a row to hide / show</span>
+      <span><svg class="i sm"><use href="#i-merge"/></svg>Drag a row onto another to merge (saved per repo)</span>
+      <span><svg class="i sm"><use href="#i-sort"/></svg>Click a header to sort</span>
+      <span><svg class="i sm"><use href="#i-pointer"/></svg>Click the chart to list that bucket's commits</span>
+      <span><svg class="i sm"><use href="#i-calendar"/></svg>Numbers follow the zoomed range and file filter</span>
+    </p>
   </section>
 </main>
 <aside id="side" hidden>
-  <div><h2></h2><button class="x" id="sideClose" title="Close">×</button></div>
+  <div class="side-h">
+    <span class="av"></span>
+    <div><h2></h2><div class="meta"></div></div>
+    <button class="icon-btn" id="sideClose" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
   <div class="list">
     <table>
-      <thead><tr><th data-k="t">date</th><th>author</th><th>commit</th><th data-k="add">+</th><th data-k="del">−</th>
-        <th data-k="net">net</th><th data-k="churn">churn</th></tr></thead>
+      <thead><tr><th data-k="t">Date</th><th>Author</th><th>Commit</th><th data-k="add">+</th><th data-k="del">−</th>
+        <th data-k="net">Net</th><th data-k="churn">Churn</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
 </aside>
+<div id="toast" role="status"></div>
 <script type="module" src="./app.ts"></script>
 </body>
 </html>

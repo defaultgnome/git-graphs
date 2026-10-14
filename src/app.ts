@@ -33,7 +33,8 @@ const sideEl = $("side");
 const extsEl = $("exts");
 const rowsEl = $("rows");
 const chartEl = $("chart");
-$("repo").textContent = `${data.repo} · ${raw.length.toLocaleString()} commits`;
+$("repo").textContent = data.repo;
+$("repoCount").textContent = `${raw.length.toLocaleString()} commits`;
 
 // --- state, restored from the per-repo file ---
 const view = saved.view;
@@ -57,6 +58,69 @@ restore(modeEl, view.mode);
 cumulativeEl.checked = view.cumulative ?? false;
 trendEl.checked = view.trend ?? true;
 skipFirstEl.checked = view.skipFirst ?? false;
+
+const icon = (name: string, cls = "i") => `<svg class="${cls}"><use href="#i-${name}"/></svg>`;
+// <select class="seg"> renders as a segmented control; the hidden select stays the source of truth
+const segs = [...document.querySelectorAll<HTMLSelectElement>("select.seg")].map((sel) => {
+  const bar = Object.assign(document.createElement("div"), { className: "segbar", role: "group" });
+  bar.setAttribute("aria-label", sel.getAttribute("aria-label") ?? "");
+  const btns = [...sel.options].map((o) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", title: o.text });
+    b.innerHTML = `${o.dataset.icon ? icon(o.dataset.icon) : ""}<span></span>`;
+    b.querySelector("span")!.textContent = o.text;
+    b.onclick = () => { if (sel.value !== o.value) { sel.value = o.value; sel.dispatchEvent(new Event("change")); } };
+    return b;
+  });
+  bar.append(...btns);
+  sel.hidden = true;
+  sel.after(bar);
+  return () => btns.forEach((b, i) => b.setAttribute("aria-pressed", String(sel.selectedIndex === i)));
+});
+
+// theme: system → light → dark; per-browser convenience, so localStorage is fine
+const THEMES = ["system", "light", "dark"] as const;
+const themeBtn = $<HTMLButtonElement>("theme");
+let theme: string = "system";
+try { theme = localStorage.getItem("ggrph-theme") ?? "system"; } catch {}
+function applyTheme() {
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  themeBtn.innerHTML = icon(theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor");
+  themeBtn.title = `Theme: ${theme}`;
+}
+applyTheme();
+themeBtn.onclick = () => {
+  theme = THEMES[(THEMES.indexOf(theme as any) + 1) % 3]!;
+  try { localStorage.setItem("ggrph-theme", theme); } catch {}
+  applyTheme();
+  render();
+};
+
+const toastEl = $("toast");
+let toastTimer: ReturnType<typeof setTimeout>;
+function toast(html: string) {
+  toastEl.innerHTML = html;
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+}
+
+// drag the bar between chart and board to resize the chart
+const splitter = $("splitter");
+splitter.onpointerdown = (e) => {
+  const wrap = chartEl.parentElement!, y0 = e.clientY, h0 = wrap.offsetHeight;
+  splitter.setPointerCapture(e.pointerId);
+  splitter.classList.add("drag");
+  splitter.onpointermove = (ev) => (wrap.style.height = `${Math.max(160, h0 + ev.clientY - y0)}px`);
+  splitter.onpointerup = () => { splitter.onpointermove = null; splitter.classList.remove("drag"); };
+};
+
+const initials = (name: string) =>
+  name.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join("").toUpperCase() || "?";
+function avatar(el: HTMLElement, r: number, color?: string) {
+  el.textContent = initials(authors[r]!.name);
+  el.style.background = color || getComputedStyle(document.documentElement).getPropertyValue("--other");
+}
 
 // entries for authors/extensions not in this history (e.g. other branches) are kept, not dropped
 let saveTimer: ReturnType<typeof setTimeout>;
@@ -103,7 +167,7 @@ function applyFilter() {
     return all || hit ? [[t, a, add, del, ri] as const] : [];
   });
   const n = allowed.size;
-  extsEl.querySelector("summary")!.textContent =
+  extsEl.querySelector("summary .v")!.textContent =
     n === data.exts.length ? "Files: all" : n === 0 ? "Files: none" :
     `Files: ${[...data.exts.keys()].filter((e) => allowed.has(e)).slice(0, 4).map((e) => data.exts[e]).join(" ")}${n > 4 ? ` +${n - 4}` : ""}`;
 }
@@ -127,6 +191,11 @@ function buildExtFilter() {
     allowed.clear();
     for (const b of boxes) if ((b.checked = keep(data.exts[+b.value]!))) allowed.add(+b.value);
     applyFilter(); render();
+  };
+  const search = extsEl.querySelector("input[type=search]") as HTMLInputElement;
+  search.oninput = () => {
+    const q = search.value.trim().toLowerCase();
+    for (const b of boxes) b.parentElement!.hidden = !data.exts[+b.value]!.toLowerCase().includes(q);
   };
   extsEl.querySelector<HTMLButtonElement>(".all")!.onclick = () => pick(() => true);
   extsEl.querySelector<HTMLButtonElement>(".none")!.onclick = () => pick(() => false);
@@ -296,11 +365,22 @@ function renderChart() {
   const muted = css.getPropertyValue("--text-muted").trim();
   const grid = css.getPropertyValue("--border").trim();
   const other = css.getPropertyValue("--other").trim();
+  const v = (k: string) => css.getPropertyValue(k).trim();
+  const accent = v("--accent"), soft = v("--accent-soft");
   const mode = modeEl.value;
+  // vertical fade under a line, from the series colour to transparent
+  const fade = (hex: string, a = 0.28) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+      { offset: 0, color: `rgba(${r},${g},${bl},${a})` }, { offset: 1, color: `rgba(${r},${g},${bl},0)` },
+    ]);
+  };
   const pts = (arr: number[]) => arr.map((v, i) => [buckets[i]!, v]);
   const line = (name: string, arr: number[], color: string, extra: object = {}) => ({
     name, type: mode === "bar" ? "bar" : "line", data: pts(arr), color, emphasis: { focus: "series" },
-    ...(mode === "bar" ? { barMaxWidth: 24 } : { showSymbol: false, smooth: mode === "smooth", lineStyle: { width: 2 } }),
+    ...(mode === "bar"
+      ? { barMaxWidth: 24, itemStyle: { borderRadius: layout === "stacked" ? 0 : [3, 3, 0, 0] } }
+      : { showSymbol: false, symbolSize: 7, smooth: mode === "smooth", lineStyle: { width: 2 } }),
     ...extra,
   });
   // dashed fit sharing its series' name, so the legend toggles both; kept out of the tooltip
@@ -310,18 +390,34 @@ function renderChart() {
     trends.push({ id, pts: pts(arr) });
     return {
       id, name, type: "line", data: fit(pts(arr)), color, xAxisIndex: axis, yAxisIndex: axis, symbol: "none", silent: true,
-      z: 5, lineStyle: { type: "dashed", width: 1.5 }, tooltip: { show: false }, emphasis: { disabled: true },
+      z: 5, lineStyle: { type: [6, 4], width: 1.5, opacity: 0.9 }, tooltip: { show: false }, emphasis: { disabled: true },
     };
   };
   const withTrend = trendEl.checked;
   const axisCommon = {
-    axisLine: { lineStyle: { color: grid } }, axisLabel: { color: muted, hideOverlap: true },
-    splitLine: { lineStyle: { color: grid } },
+    axisLine: { lineStyle: { color: grid } }, axisTick: { show: false }, axisLabel: { color: muted, hideOverlap: true, fontSize: 11 },
+    splitLine: { lineStyle: { color: grid, type: [4, 4] } },
+  };
+  const yCommon = { ...axisCommon, axisLine: { show: false }, axisLabel: { ...axisCommon.axisLabel, formatter: compact } };
+  const slider = {
+    type: "slider", height: 26, borderColor: "transparent", backgroundColor: v("--surface-2"),
+    fillerColor: soft, borderRadius: 8, showDetail: false,
+    dataBackground: { lineStyle: { color: muted, opacity: 0.5 }, areaStyle: { color: muted, opacity: 0.15 } },
+    selectedDataBackground: { lineStyle: { color: accent, opacity: 0.8 }, areaStyle: { color: accent, opacity: 0.2 } },
+    handleIcon: "path://M-3,-11 h6 a3,3 0 0 1 3,3 v16 a3,3 0 0 1 -3,3 h-6 a3,3 0 0 1 -3,-3 v-16 a3,3 0 0 1 3,-3 z",
+    handleSize: "90%", handleStyle: { color: v("--surface-1"), borderColor: accent, borderWidth: 1.5 },
+    moveHandleSize: 4, moveHandleStyle: { color: accent, opacity: 0.35 }, emphasis: { moveHandleStyle: { opacity: 0.8 } },
   };
   const zoomRange = zoom ? { startValue: zoom[0], endValue: zoom[1] } : {};
   const tooltip = {
-    trigger: "axis", order: "valueDesc",
-    valueFormatter: (v: number) => v?.toLocaleString(),
+    trigger: "axis", order: "valueDesc", confine: true,
+    valueFormatter: (x: number) => x?.toLocaleString(),
+    backgroundColor: v("--surface-1"), borderColor: grid, borderWidth: 1, padding: [8, 12],
+    textStyle: { color: v("--text-primary"), fontSize: 12 },
+    extraCssText: "border-radius:10px;box-shadow:" + v("--shadow-pop"),
+    axisPointer: mode === "bar"
+      ? { type: "shadow", shadowStyle: { color: soft } }
+      : { type: "line", lineStyle: { color: muted, type: [4, 4] } },
   };
 
   let opt: any;
@@ -335,25 +431,26 @@ function renderChart() {
     const all = shown.map((_, i) => i);
     opt = {
       animation: false,
+      textStyle: { fontFamily: getComputedStyle(document.body).fontFamily },
       tooltip,
       title: shown.map((r, i) => ({
         text: authors[r]!.name, top: TOP + i * ROW - 4, left: 12,
-        textStyle: { fontSize: 12, fontWeight: 500, color: ink },
+        textStyle: { fontSize: 12, fontWeight: 600, color: ink },
       })),
-      grid: shown.map((_, i) => ({ top: TOP + i * ROW + 18, height: ROW - 46, left: 56, right: 24 })),
+      grid: shown.map((_, i) => ({ top: TOP + i * ROW + 24, height: ROW - 52, left: 56, right: 24 })),
       // bars sit centred on the bucket start; let echarts pad the axis so the edge ones aren't cut in half
       xAxis: shown.map((_, i) => ({
         type: "time", gridIndex: i, ...(mode === "bar" ? {} : { min: buckets[0], max: buckets.at(-1) }),
         ...axisCommon, splitLine: { show: false },
       })),
-      yAxis: shown.map((_, i) => ({ type: "value", gridIndex: i, min: lo, max: hi, splitNumber: 2, ...axisCommon })),
+      yAxis: shown.map((_, i) => ({ type: "value", gridIndex: i, min: lo, max: hi, splitNumber: 2, ...yCommon })),
       dataZoom: [
-        { type: "slider", xAxisIndex: all, top: 8, height: 24, ...zoomRange },
+        { ...slider, xAxisIndex: all, top: 10, ...zoomRange },
         { type: "inside", xAxisIndex: all, zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false, ...zoomRange },
       ],
       series: [
         ...shown.map((r, i) => line(authors[r]!.name, per.get(r)!, colors.get(r)!, {
-          xAxisIndex: i, yAxisIndex: i, areaStyle: { opacity: 0.15 },
+          xAxisIndex: i, yAxisIndex: i, areaStyle: { color: fade(colors.get(r)!) },
         })),
         ...(withTrend ? shown.map((r, i) => trend(authors[r]!.name, per.get(r)!, colors.get(r)!, i)) : []),
       ],
@@ -362,7 +459,7 @@ function renderChart() {
     chartEl.style.height = "100%";
     let list: any[];
     if (layout === "total") {
-      list = [line("total", total, css.getPropertyValue("--s1").trim(), { areaStyle: { opacity: 0.15 } })];
+      list = [line("total", total, accent, { areaStyle: { color: fade(accent, 0.35) } })];
     } else {
       // only the coloured (top 8) get their own series; the rest fold into "others"
       const stacked = layout === "stacked";
@@ -383,13 +480,18 @@ function renderChart() {
     }
     opt = {
       animation: false,
+      textStyle: { fontFamily: getComputedStyle(document.body).fontFamily },
       tooltip,
-      legend: { show: legend, top: 8, textStyle: { color: ink }, type: "scroll" },
-      grid: { top: 48, left: 64, right: 24, bottom: 72 },
+      legend: {
+        show: legend, top: 12, type: "scroll", icon: "roundRect", itemWidth: 10, itemHeight: 10, itemGap: 18,
+        textStyle: { color: ink, fontSize: 12 }, inactiveColor: grid,
+        pageIconColor: accent, pageIconInactiveColor: grid, pageTextStyle: { color: muted },
+      },
+      grid: { top: legend ? 52 : 24, left: 56, right: 24, bottom: 64 },
       xAxis: { type: "time", ...axisCommon, splitLine: { show: false } },
-      yAxis: { type: "value", ...axisCommon },
+      yAxis: { type: "value", ...yCommon },
       dataZoom: [
-        { type: "slider", bottom: 16, height: 24, ...zoomRange },
+        { ...slider, bottom: 14, ...zoomRange },
         { type: "inside", ...zoomRange },
       ],
       series: list,
@@ -399,6 +501,7 @@ function renderChart() {
   chart.resize();
 }
 
+const compact = (n: number) => Intl.NumberFormat("en", { notation: "compact" }).format(n);
 const fmtDate = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 
 function renderBoard() {
@@ -416,51 +519,71 @@ function renderBoard() {
     for (const k of tix(c)) (seen.get(r) ?? seen.set(r, new Set()).get(r)!).add(k);
   }
   for (const [r, set] of seen) stats.get(r)!.tickets = set.size;
+  renderKpis([...stats.values()].filter((s) => !hidden.has(s.r)), seen);
   const colors = colorOf(rank(m));
-  const order = sortRows([...stats.values()], boardSort, boardKey(), boardEl.tHead!);
+  const key = boardKey();
+  const order = sortRows([...stats.values()], boardSort, key, boardEl.tHead!);
+  const dated = key === "first" || key === "last";
+  const max = Math.max(1, ...order.map((s) => Math.abs(col(s, key))));
   rowsEl.replaceChildren();
   order.forEach((s, i) => {
     const r = s.r;
+    const off = hidden.has(r);
     const tr = document.createElement("tr");
-    tr.className = "root" + (hidden.has(r) ? " off" : "");
+    tr.className = "root" + (off ? " off" : "");
     tr.draggable = true;
     tr.title = `${authors[r]!.email} — click to hide/show, drag onto another row to merge`;
     const al = aliases(r);
-    tr.innerHTML = `<td>${i + 1}</td><td><span class="sw"></span><span class="nm"></span></td>
-      <td>${s.commits.toLocaleString()}</td><td>${s.tickets.toLocaleString()}</td><td class="add">+${s.add.toLocaleString()}</td>
-      <td class="add">−${s.del.toLocaleString()}</td>
-      <td>${(s.add - s.del).toLocaleString()}</td><td>${(s.add + s.del).toLocaleString()}</td>
-      <td>${s.first ? fmtDate(s.first) : "–"}</td><td>${s.last ? fmtDate(s.last) : "–"}</td>`;
-    (tr.querySelector(".sw") as HTMLElement).style.background = colors.get(r) ?? "transparent";
+    const net = s.add - s.del;
+    tr.innerHTML = `<td class="rk">${icon("grip", "i grip")}${i + 1}</td>
+      <td><div class="who"><span class="av"></span><div class="who-t"><div class="who-n"><span class="nm"></span></div>
+        ${dated ? "" : `<i class="share"><b></b></i>`}</div>
+        <button class="eye" tabindex="-1" title="${off ? "Show" : "Hide"}">${icon(off ? "eye-off" : "eye")}</button></div></td>
+      <td>${s.commits.toLocaleString()}</td><td>${s.tickets.toLocaleString()}</td>
+      <td class="pos">+${s.add.toLocaleString()}</td><td class="neg">−${s.del.toLocaleString()}</td>
+      <td class="${net < 0 ? "neg" : ""}">${net.toLocaleString()}</td><td>${(s.add + s.del).toLocaleString()}</td>
+      <td class="dim">${s.first ? fmtDate(s.first) : "–"}</td><td class="dim">${s.last ? fmtDate(s.last) : "–"}</td>`;
+    avatar(tr.querySelector(".av")!, r, colors.get(r));
     tr.querySelector(".nm")!.textContent = authors[r]!.name;
+    const bar = tr.querySelector<HTMLElement>(".share b");
+    if (bar) Object.assign(bar.style, { width: `${(Math.abs(col(s, key)) / max) * 100}%`, background: colors.get(r) ?? "var(--other)" });
     if (al.length) {
       const btn = document.createElement("button");
       btn.className = "badge";
-      btn.textContent = `+${al.length} alias${al.length > 1 ? "es" : ""}`;
+      btn.title = "Show merged identities";
+      btn.setAttribute("aria-expanded", String(expanded.has(r)));
+      btn.innerHTML = `${icon("merge", "i sm")}<span></span>`;
+      btn.lastElementChild!.textContent = `+${al.length}`;
       btn.onclick = (e) => { e.stopPropagation(); expanded.has(r) ? expanded.delete(r) : expanded.add(r); renderBoard(); };
-      tr.children[1]!.append(btn);
+      tr.querySelector(".who-n")!.append(btn);
     }
     tr.onclick = () => { hidden.has(r) ? hidden.delete(r) : hidden.add(r); render(); };
-    tr.ondragstart = (e) => e.dataTransfer!.setData("text/plain", String(r));
+    tr.ondragstart = (e) => { e.dataTransfer!.setData("text/plain", String(r)); tr.classList.add("dragging"); };
+    tr.ondragend = () => tr.classList.remove("dragging");
     tr.ondragover = (e) => { e.preventDefault(); tr.classList.add("drop"); };
-    tr.ondragleave = () => tr.classList.remove("drop");
+    tr.ondragleave = (e) => { if (!tr.contains(e.relatedTarget as Node)) tr.classList.remove("drop"); };
     tr.ondrop = (e) => {
       e.preventDefault();
       const src = Number(e.dataTransfer!.getData("text/plain"));
-      if (Number.isInteger(src) && src !== r) merge(src, r);
-      else tr.classList.remove("drop");
+      if (Number.isInteger(src) && src !== r) {
+        const name = authors[src]!.name;
+        merge(src, r);
+        toast(`${icon("merge")}<span></span>`);
+        toastEl.lastElementChild!.textContent = `Merged ${name} into ${authors[r]!.name}`;
+      } else tr.classList.remove("drop");
     };
     rowsEl.append(tr);
 
     if (expanded.has(r)) for (const a of [r, ...al]) {
       const sub = document.createElement("tr");
       sub.className = "alias";
-      sub.innerHTML = `<td></td><td colspan="9"></td>`;
-      sub.children[1]!.textContent = `${authors[a]!.name} <${authors[a]!.email}>`;
+      sub.innerHTML = `<td></td><td colspan="9">${icon(a === r ? "users" : "merge", "i sm")}<span></span><em></em></td>`;
+      sub.querySelector("span")!.textContent = authors[a]!.name;
+      sub.querySelector("em")!.textContent = `<${authors[a]!.email}>`;
       if (a !== r) {
         const x = document.createElement("button");
         x.className = "x";
-        x.textContent = "×";
+        x.innerHTML = icon("x", "i sm");
         x.title = "Unmerge";
         x.onclick = () => { parent[a] = a; if (aliases(r).length === 0) expanded.delete(r); render(); };
         sub.children[1]!.append(x);
@@ -468,6 +591,28 @@ function renderBoard() {
       rowsEl.append(sub);
     }
   });
+}
+
+// headline numbers for everyone shown, over the zoomed range
+const kpisEl = $("kpis");
+function renderKpis(shown: { r: number; commits: number; add: number; del: number; first: number; last: number }[], seen: Map<number, Set<string>>) {
+  const sum = (k: "commits" | "add" | "del") => shown.reduce((n, s) => n + s[k], 0);
+  const tickets = new Set(shown.flatMap((s) => [...(seen.get(s.r) ?? [])])).size;
+  const active = shown.filter((s) => s.commits);
+  const first = Math.min(...active.map((s) => s.first)), last = Math.max(...active.map((s) => s.last));
+  const add = sum("add"), del = sum("del");
+  const items: [string, string, string, string?][] = [
+    ["commit", "Commits", sum("commits").toLocaleString()],
+    ["users", "Contributors", active.length.toLocaleString()],
+    ["ticket", "Tickets", tickets.toLocaleString()],
+    ["plus", "Added", `+${compact(add)}`, "pos"],
+    ["minus", "Deleted", `−${compact(del)}`, "neg"],
+    ["activity", "Churn", compact(add + del)],
+    ["calendar", "Range", active.length ? `${Math.max(1, Math.round((last - first) / DAY)).toLocaleString()}d` : "–"],
+  ];
+  kpisEl.innerHTML = items.map(([ic, label, val, cls]) =>
+    `<div class="kpi ${cls ?? ""}"><span class="ic">${icon(ic)}</span><div><span>${label}</span><b>${val}</b></div></div>`).join("");
+  if (active.length) (kpisEl.lastElementChild as HTMLElement).title = `${fmtDate(first)} → ${fmtDate(last)}`;
 }
 
 function merge(src: number, dst: number) {
@@ -489,22 +634,33 @@ function renderSide() {
   sortRows(rows, sideSort, sideKey(), sideTable.tHead!);
   const span = from === -Infinity ? `up to ${fmtDate(to - 1)}` :
     fmtDate(from) === fmtDate(to - 1) ? fmtDate(from) : `${fmtDate(from)} → ${fmtDate(to - 1)}`;
-  sideEl.querySelector("h2")!.innerHTML = `<span></span> <small></small>`;
-  sideEl.querySelector("h2 span")!.textContent = root === null ? "all shown" : authors[root]!.name;
-  sideEl.querySelector("h2 small")!.textContent = `${span} · ${rows.length.toLocaleString()} commits`;
   const colors = colorOf(rank(metricEl.value as Metric));
+  const head = sideEl.querySelector<HTMLElement>(".side-h .av")!;
+  if (root === null) { head.innerHTML = icon("users", "i sm"); head.style.background = "var(--accent)"; }
+  else avatar(head, root, colors.get(root));
+  sideEl.querySelector("h2")!.textContent = root === null ? "Everyone shown" : authors[root]!.name;
+  const add = rows.reduce((n, c) => n + c.add, 0), del = rows.reduce((n, c) => n + c.del, 0);
+  sideEl.querySelector(".meta")!.innerHTML =
+    `<span>${icon("calendar", "i sm")} ${span}</span><span>${icon("commit", "i sm")} ${rows.length.toLocaleString()} commits</span>` +
+    `<span class="pos">+${add.toLocaleString()}</span><span class="neg">−${del.toLocaleString()}</span>`;
   // ponytail: render cap keeps huge cumulative ranges snappy; paginate if anyone needs row 501
   sideTable.tBodies[0]!.replaceChildren(...rows.slice(0, 500).map((c) => {
     const tr = document.createElement("tr");
     const [hash, subject] = raw[c.ri]!.info;
-    tr.innerHTML = `<td>${fmtDate(c.t)}</td><td><span class="sw"></span><span class="nm"></span></td><td><code></code><span></span></td>
-      <td class="add">+${c.add.toLocaleString()}</td><td class="add">−${c.del.toLocaleString()}</td>
-      <td>${(c.add - c.del).toLocaleString()}</td><td>${(c.add + c.del).toLocaleString()}</td>`;
+    const net = c.add - c.del;
+    tr.innerHTML = `<td class="dim">${fmtDate(c.t)}</td><td><div class="who"><span class="av sm"></span><span class="nm"></span></div></td>
+      <td><button class="hash" title="Copy hash"></button><span class="subj"></span></td>
+      <td class="pos">+${c.add.toLocaleString()}</td><td class="neg">−${c.del.toLocaleString()}</td>
+      <td class="${net < 0 ? "neg" : ""}">${net.toLocaleString()}</td><td>${(c.add + c.del).toLocaleString()}</td>`;
     const r = parent[c.a]!;
-    (tr.querySelector(".sw") as HTMLElement).style.background = colors.get(r) ?? "transparent";
+    avatar(tr.querySelector(".av")!, r, colors.get(r));
     tr.querySelector(".nm")!.textContent = authors[r]!.name;
-    tr.querySelector("code")!.textContent = hash;
-    tr.querySelector("td:nth-child(3) span")!.textContent = subject;
+    const h = tr.querySelector<HTMLButtonElement>(".hash")!;
+    h.textContent = hash;
+    h.onclick = () => navigator.clipboard.writeText(hash).then(() => toast(`${icon("check")} Copied ${hash}`));
+    // ticket keys become chips; odd split parts are the captured keys
+    tr.querySelector(".subj")!.append(...subject.split(/(\bNX-\d+\b)/i).map((part, i) =>
+      i % 2 ? Object.assign(document.createElement("span"), { className: "tk", textContent: part }) : part));
     return tr;
   }));
 }
@@ -512,6 +668,7 @@ $("sideClose").onclick = () => { side = null; renderSide(); };
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && side) { side = null; renderSide(); } });
 
 function render() {
+  for (const sync of segs) sync();
   renderChart();
   renderBoard();
   renderSide();
