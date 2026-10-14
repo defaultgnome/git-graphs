@@ -1,11 +1,12 @@
 import * as echarts from "echarts";
 import type { Data } from "./git";
+import { fuzzy } from "./fuzzy";
 
 type Metric = "commits" | "tickets" | "churn" | "added" | "deleted" | "net";
 type Bucket = "day" | "week" | "month";
 type View = Partial<{
   metric: string; bucket: string; cumulative: boolean; layout: string; mode: string; trend: boolean; skipFirst: boolean;
-  zoom: [number, number] | null; hidden: string[]; excludedExts: string[];
+  zoom: [number, number] | null; hidden: string[]; excludedExts: string[]; names: Record<string, string>;
 }>;
 
 const [data, saved] = (await Promise.all(
@@ -48,6 +49,8 @@ const hidden = new Set<number>( // roots
   (view.hidden ?? []).flatMap((e) => (byEmail.has(e) ? [parent[byEmail.get(e)!]!] : [])),
 );
 const expanded = new Set<number>(); // roots showing their aliases
+const names = new Map(Object.entries(view.names ?? {})); // email -> display name override
+const nameOf = (r: number) => names.get(authors[r]!.email) ?? authors[r]!.name;
 let zoom: [number, number] | null = view.zoom ?? null; // visible ms range
 const restore = (el: HTMLSelectElement, v?: string) => {
   if (v && [...el.options].some((o) => o.value === v)) el.value = v;
@@ -118,7 +121,7 @@ splitter.onpointerdown = (e) => {
 const initials = (name: string) =>
   name.split(/[\s._@-]+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join("").toUpperCase() || "?";
 function avatar(el: HTMLElement, r: number, color?: string) {
-  el.textContent = initials(authors[r]!.name);
+  el.textContent = initials(nameOf(r));
   el.style.background = color || getComputedStyle(document.documentElement).getPropertyValue("--other");
 }
 
@@ -141,6 +144,7 @@ function save() {
         ...(view.excludedExts ?? []).filter((x) => !knownExt.has(x)),
         ...data.exts.filter((_, e) => !allowed.has(e)),
       ],
+      names: Object.fromEntries(names),
     };
     fetch("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(saved) });
   }, 300);
@@ -247,7 +251,7 @@ function sortRows<T extends Row>(items: T[], s: Sort, k: string, thead: HTMLElem
     th.classList.toggle("on", th.dataset.k === k);
     th.classList.toggle("asc", th.dataset.k === k && s.asc);
   }
-  const cmp = (a: T, b: T) => (k === "name" ? authors[a.r!]!.name.localeCompare(authors[b.r!]!.name) : col(a, k) - col(b, k));
+  const cmp = (a: T, b: T) => (k === "name" ? nameOf(a.r!).localeCompare(nameOf(b.r!)) : col(a, k) - col(b, k));
   return items.sort((a, b) => (s.asc ? 1 : -1) * cmp(a, b));
 }
 function bindSort(thead: HTMLElement, s: Sort, current: () => string, rerender: () => void) {
@@ -438,7 +442,7 @@ function renderChart() {
       textStyle: { fontFamily: getComputedStyle(document.body).fontFamily },
       tooltip,
       title: shown.map((r, i) => ({
-        text: authors[r]!.name, top: TOP + i * ROW - 4, left: 12,
+        text: nameOf(r), top: TOP + i * ROW - 4, left: 12,
         textStyle: { fontSize: 12, fontWeight: 600, color: ink },
       })),
       grid: shown.map((_, i) => ({ top: TOP + i * ROW + 24, height: ROW - 52, left: 56, right: 24 })),
@@ -453,10 +457,10 @@ function renderChart() {
         { type: "inside", xAxisIndex: all, zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false, ...zoomRange },
       ],
       series: [
-        ...shown.map((r, i) => line(authors[r]!.name, per.get(r)!, colors.get(r)!, {
+        ...shown.map((r, i) => line(nameOf(r), per.get(r)!, colors.get(r)!, {
           xAxisIndex: i, yAxisIndex: i, areaStyle: { color: fade(colors.get(r)!) },
         })),
-        ...(withTrend ? shown.map((r, i) => trend(authors[r]!.name, per.get(r)!, colors.get(r)!, i)) : []),
+        ...(withTrend ? shown.map((r, i) => trend(nameOf(r), per.get(r)!, colors.get(r)!, i)) : []),
       ],
     };
   } else {
@@ -469,7 +473,7 @@ function renderChart() {
       const stacked = layout === "stacked";
       const extra = stacked ? { stack: "all", areaStyle: { opacity: 0.85 }, lineStyle: { width: 1 } } : {};
       const rest = ranked.filter((r) => !top.has(r));
-      list = ranked.filter((r) => top.has(r)).map((r) => line(authors[r]!.name, per.get(r)!, colors.get(r)!, extra));
+      list = ranked.filter((r) => top.has(r)).map((r) => line(nameOf(r), per.get(r)!, colors.get(r)!, extra));
       if (rest.length) {
         const sum = new Array(buckets.length).fill(0);
         for (const r of rest) per.get(r)!.forEach((v, i) => (sum[i] += v));
@@ -542,13 +546,15 @@ function renderBoard() {
     tr.innerHTML = `<td class="rk">${icon("grip", "i grip")}${i + 1}</td>
       <td><div class="who"><span class="av"></span><div class="who-t"><div class="who-n"><span class="nm"></span></div>
         ${dated ? "" : `<i class="share"><b></b></i>`}</div>
-        <button class="eye" tabindex="-1" title="${off ? "Show" : "Hide"}">${icon(off ? "eye-off" : "eye")}</button></div></td>
+        <button class="act ren" tabindex="-1" title="Rename">${icon("pen")}</button>
+        <button class="act lnk" tabindex="-1" title="Merge others into this row…">${icon("link")}</button>
+        <button class="act eye" tabindex="-1" title="${off ? "Show" : "Hide"}">${icon(off ? "eye-off" : "eye")}</button></div></td>
       <td>${s.commits.toLocaleString()}</td><td>${s.tickets.toLocaleString()}</td>
       <td class="pos">+${s.add.toLocaleString()}</td><td class="neg">−${s.del.toLocaleString()}</td>
       <td class="${net < 0 ? "neg" : ""}">${net.toLocaleString()}</td><td>${(s.add + s.del).toLocaleString()}</td>
       <td class="dim">${s.first ? fmtDate(s.first) : "–"}</td><td class="dim">${s.last ? fmtDate(s.last) : "–"}</td>`;
     avatar(tr.querySelector(".av")!, r, colors.get(r));
-    tr.querySelector(".nm")!.textContent = authors[r]!.name;
+    tr.querySelector(".nm")!.textContent = nameOf(r);
     const bar = tr.querySelector<HTMLElement>(".share b");
     if (bar) Object.assign(bar.style, { width: `${(Math.abs(col(s, key)) / max) * 100}%`, background: colors.get(r) ?? "var(--other)" });
     if (al.length) {
@@ -561,6 +567,8 @@ function renderBoard() {
       btn.onclick = (e) => { e.stopPropagation(); expanded.has(r) ? expanded.delete(r) : expanded.add(r); renderBoard(); };
       tr.querySelector(".who-n")!.append(btn);
     }
+    tr.querySelector<HTMLElement>(".ren")!.onclick = (e) => { e.stopPropagation(); rename(tr, r); };
+    tr.querySelector<HTMLElement>(".lnk")!.onclick = (e) => { e.stopPropagation(); openMerge(r, e.currentTarget as HTMLElement); };
     tr.onclick = () => { hidden.has(r) ? hidden.delete(r) : hidden.add(r); render(); };
     tr.ondragstart = (e) => { e.dataTransfer!.setData("text/plain", String(r)); tr.classList.add("dragging"); };
     tr.ondragend = () => tr.classList.remove("dragging");
@@ -569,12 +577,8 @@ function renderBoard() {
     tr.ondrop = (e) => {
       e.preventDefault();
       const src = Number(e.dataTransfer!.getData("text/plain"));
-      if (Number.isInteger(src) && src !== r) {
-        const name = authors[src]!.name;
-        merge(src, r);
-        toast(`${icon("merge")}<span></span>`);
-        toastEl.lastElementChild!.textContent = `Merged ${name} into ${authors[r]!.name}`;
-      } else tr.classList.remove("drop");
+      if (Number.isInteger(src) && src !== r) merge(src, r);
+      else tr.classList.remove("drop");
     };
     rowsEl.append(tr);
 
@@ -620,10 +624,76 @@ function renderKpis(shown: { r: number; commits: number; add: number; del: numbe
 }
 
 function merge(src: number, dst: number) {
+  const name = nameOf(src);
   parent.forEach((p, i) => { if (p === src) parent[i] = dst; });
   hidden.delete(src);
   render();
+  toast(`${icon("merge")}<span></span>`);
+  toastEl.lastElementChild!.textContent = `Merged ${name} into ${nameOf(dst)}`;
 }
+
+// inline rename; blank (or the git name) clears the override
+function rename(tr: HTMLElement, r: number) {
+  const email = authors[r]!.email;
+  const inp = Object.assign(document.createElement("input"), { className: "nm-edit", value: nameOf(r), placeholder: authors[r]!.name });
+  tr.draggable = false;
+  tr.querySelector(".nm")!.replaceWith(inp);
+  inp.focus();
+  inp.select();
+  let done = false;
+  const finish = (ok: boolean) => {
+    if (done) return;
+    done = true;
+    const v = inp.value.trim();
+    if (ok) v && v !== authors[r]!.name ? names.set(email, v) : names.delete(email);
+    render();
+  };
+  inp.onclick = (e) => e.stopPropagation();
+  inp.onkeydown = (e) => {
+    if (e.key === "Enter") finish(true);
+    if (e.key === "Escape") { e.stopPropagation(); finish(false); }
+  };
+  inp.onblur = () => finish(true);
+}
+
+// merge picker for when the drop target is scrolled away; fuzzy over display name + every merged name/email
+const popEl = $("mergePop");
+const popSearch = popEl.querySelector("input")!;
+const popList = popEl.querySelector<HTMLElement>(".list")!;
+let popTarget = -1;
+function openMerge(r: number, anchor: HTMLElement) {
+  popTarget = r;
+  popSearch.value = "";
+  popEl.showPopover();
+  const b = anchor.getBoundingClientRect(), w = popEl.offsetWidth, h = popEl.offsetHeight;
+  popEl.style.left = `${Math.max(8, Math.min(b.right - w, innerWidth - w - 8))}px`;
+  popEl.style.top = `${b.bottom + 4 + h > innerHeight ? Math.max(8, b.top - 4 - h) : b.bottom + 4}px`;
+  renderMerge();
+  popSearch.focus();
+}
+function renderMerge() {
+  popEl.querySelector("b")!.textContent = nameOf(popTarget);
+  const q = popSearch.value;
+  const hay = (x: number) => [nameOf(x), ...[x, ...aliases(x)].flatMap((a) => [authors[a]!.name, authors[a]!.email])];
+  const items = roots().filter((x) => x !== popTarget)
+    .map((x) => ({ x, s: Math.max(...hay(x).map((h) => fuzzy(q, h) ?? -Infinity)) }))
+    .filter((i) => i.s > -Infinity)
+    .sort((a, b) => b.s - a.s || nameOf(a.x).localeCompare(nameOf(b.x)));
+  const colors = colorOf(rank(metricEl.value as Metric));
+  // ponytail: 100-row cap, the search narrows it anyway
+  popList.replaceChildren(...items.slice(0, 100).map(({ x }) => {
+    const btn = document.createElement("button");
+    btn.innerHTML = `<span class="av sm"></span><span class="nm"></span><em></em>`;
+    avatar(btn.querySelector(".av")!, x, colors.get(x));
+    btn.querySelector(".nm")!.textContent = nameOf(x);
+    btn.querySelector("em")!.textContent = authors[x]!.email;
+    btn.onclick = () => { merge(x, popTarget); renderMerge(); popSearch.focus(); };
+    return btn;
+  }));
+  if (!items.length) popList.innerHTML = `<p class="dim">No matches</p>`;
+}
+popSearch.oninput = renderMerge;
+popSearch.onkeydown = (e) => { if (e.key === "Enter") popList.querySelector("button")?.click(); };
 
 // --- commit explorer for a clicked bucket ---
 let side: { from: number; to: number; root: number | null } | null = null;
@@ -642,7 +712,7 @@ function renderSide() {
   const head = sideEl.querySelector<HTMLElement>(".side-h .av")!;
   if (root === null) { head.innerHTML = icon("users", "i sm"); head.style.background = "var(--accent)"; }
   else avatar(head, root, colors.get(root));
-  sideEl.querySelector("h2")!.textContent = root === null ? "Everyone shown" : authors[root]!.name;
+  sideEl.querySelector("h2")!.textContent = root === null ? "Everyone shown" : nameOf(root);
   const add = rows.reduce((n, c) => n + c.add, 0), del = rows.reduce((n, c) => n + c.del, 0);
   sideEl.querySelector(".meta")!.innerHTML =
     `<span>${icon("calendar", "i sm")} ${span}</span><span>${icon("commit", "i sm")} ${rows.length.toLocaleString()} commits</span>` +
@@ -658,7 +728,7 @@ function renderSide() {
       <td class="${net < 0 ? "neg" : ""}">${net.toLocaleString()}</td><td>${(c.add + c.del).toLocaleString()}</td>`;
     const r = parent[c.a]!;
     avatar(tr.querySelector(".av")!, r, colors.get(r));
-    tr.querySelector(".nm")!.textContent = authors[r]!.name;
+    tr.querySelector(".nm")!.textContent = nameOf(r);
     const h = tr.querySelector<HTMLButtonElement>(".hash")!;
     h.textContent = hash;
     h.onclick = () => navigator.clipboard.writeText(hash).then(() => toast(`${icon("check")} Copied ${hash}`));
@@ -669,7 +739,7 @@ function renderSide() {
   }));
 }
 $("sideClose").onclick = () => { side = null; renderSide(); };
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && side) { side = null; renderSide(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && side && !popEl.matches(":popover-open")) { side = null; renderSide(); } });
 
 function render() {
   for (const sync of segs) sync();
